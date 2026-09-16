@@ -256,7 +256,15 @@ with tab_pf:
                       help="BTC、ETH 作保证金时按多少比例计入权益 (两者用同一个值, 这是简化)。你设定的假设值, 不是 Bitget 官方数值。")
             mm, haircut = mm_haircut()
 
-            positions = holdings.rows_to_positions(edited.to_dict("records"), prices, auto, SUPPORTED)
+            rows = edited.to_dict("records")
+            # 手动加的行要补取当前价: prices 只覆盖了进来时就有的持仓, 新打的标的取不到价,
+            # 名义价值算不出来, 那一行连同你填的买入价数量都会被丢掉 (09-17 Ivan 实测)
+            new_syms = tuple(sorted({str(r.get("标的") or "").strip().upper() for r in rows} & SUPPORTED - set(prices)))
+            if new_syms:
+                prices = {**prices, **get_prices(new_syms)}
+            positions, skipped = holdings.parse_rows(rows, prices, auto, SUPPORTED)
+            for s in skipped:
+                st.warning("这一行没有计入: " + s)
             cur = pf.Account(positions, usdt, btc, mm, haircut, eth, haircut)
             err = pf.validate_account(cur)
             if err:

@@ -43,12 +43,18 @@ def position_rows(positions, prices):
     return rows
 
 
-def rows_to_positions(rows, prices, auto, supported):
-    """表格行 -> Position 列表。auto=True 时名义价值由 数量 × 当前价 算出。"""
-    out = []
+def parse_rows(rows, prices, auto, supported) -> tuple[list, list[str]]:
+    """
+    表格行 -> (Position 列表, 被跳过的行的说明)。auto=True 时名义价值由 数量 × 当前价 算出。
+    跳过的行必须说清楚: 手动加一行却算不出名义价值时, 它原本会被静默丢掉 (09-17 Ivan 实测)。
+    """
+    out, skipped = [], []
     for r in rows:
         sym = str(r.get("标的") or "").strip().upper()
+        if not sym:
+            continue                                    # 表尾的空行, 正常
         if sym not in supported:
+            skipped.append("%s 不在支持清单里" % sym)
             continue
         qty = _num(r.get("数量"))
         entry = _num(r.get("买入价"))
@@ -57,7 +63,17 @@ def rows_to_positions(rows, prices, auto, supported):
         if auto and qty and px:
             notional = qty * px
         if notional <= 0:
+            if auto and qty and not px:
+                skipped.append("%s 取不到当前价, 算不出名义价值 —— 取消勾选「自动算」后直接填名义 USDT" % sym)
+            elif not qty and not notional:
+                skipped.append("%s 没填数量, 也没填名义 USDT" % sym)
+            else:
+                skipped.append("%s 名义价值算出来是 0" % sym)
             continue
         out.append(pf.Position(sym, SIDE_EN.get(str(r.get("方向")), "long"), notional,
                                KIND_EN.get(str(r.get("类型")), "leverage"), entry, px, qty))
-    return out
+    return out, skipped
+
+
+def rows_to_positions(rows, prices, auto, supported):
+    return parse_rows(rows, prices, auto, supported)[0]

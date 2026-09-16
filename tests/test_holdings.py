@@ -79,5 +79,23 @@ check("往返后买入价不变", back[0].entry, 150)
 check("往返后名义不变", back[0].notional, 14000)
 check("没数量时按当前价补出来", holdings.position_rows([pf.Position("SPY", "short", 5000.0)], PX)[0]["数量"], 10)
 
+
+# ---- 手动加的行: 取不到当前价时不能静默丢掉 (09-17 Ivan 实测) ----
+manual = [{"标的": "NVDA", "类型": "杠杆", "方向": "做多", "买入价": "", "数量": 70.0, "名义 USDT": 15000.0},
+          {"标的": "ORCL", "类型": "杠杆", "方向": "做空", "买入价": "143.22", "数量": 50.0, "名义 USDT": None},
+          {"标的": "", "类型": None, "方向": None, "买入价": None, "数量": None, "名义 USDT": None},
+          {"标的": "ZZZZ", "类型": "杠杆", "方向": "做多", "买入价": "", "数量": 1.0, "名义 USDT": 100.0}]
+
+pos, skipped = holdings.parse_rows(manual, dict(PX, ORCL=143.0), True, SUP | {"ORCL"})
+check("有价格时新行能算出来", ",".join(p.symbol for p in pos), "NVDA,ORCL")
+check("新行的名义 = 数量 x 现价", next(p.notional for p in pos if p.symbol == "ORCL"), 7150)
+check("新行的买入价也留住了", next(p.entry for p in pos if p.symbol == "ORCL"), 143.22)
+check("空行不报警告, 只报不支持的那行", ";".join(skipped), "ZZZZ 不在支持清单里")
+
+pos2, skipped2 = holdings.parse_rows(manual, PX, True, SUP | {"ORCL"})      # 没有 ORCL 的价
+check("取不到价时不算进仓位", ",".join(p.symbol for p in pos2), "NVDA")
+check("取不到价要报出来", any("ORCL" in s and "当前价" in s for s in skipped2), True)
+check("不支持的标的也要报出来", any("ZZZZ" in s for s in skipped2), True)
+
 print("\n%s" % ("全部通过" if not fails else "%d 项失败" % fails))
 sys.exit(1 if fails else 0)
