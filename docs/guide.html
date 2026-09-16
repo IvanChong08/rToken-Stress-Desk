@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>rToken Stress Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ink: #121210;
+    --panel: #171613;
+    --panel-2: #1c1b17;
+    --line: #2e2d28;
+    --line-2: #25241f;
+    --text: #ece7dc;
+    --soft: #cfc9ba;
+    --muted: #85806f;
+    --stencil: #3a3831;
+    --orange: #f08a24;
+    --red: #e2503f;
+    --green: #7fd67a;
+    --blue: #7fb0e0;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.75;
+    margin: 0;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 0 16px;
+    padding-block: 0 56px;
+  }
+
+  .tape {
+    height: 12px;
+    background: repeating-linear-gradient(45deg, var(--orange) 0 14px, var(--ink) 14px 28px);
+  }
+  .tape-thin {
+    height: 7px;
+    background: repeating-linear-gradient(45deg, var(--orange) 0 9px, var(--ink) 9px 18px);
+  }
+
+  h1, h2, h3 { font-family: var(--mono); text-wrap: balance; margin: 0; letter-spacing: 0.04em; }
+  h1 { font-size: 27px; font-weight: 700; letter-spacing: 0.08em; }
+  h2 { font-size: 19px; font-weight: 700; }
+  h3 { font-size: 15px; font-weight: 700; }
+  p { margin: 0; }
+  a { color: var(--orange); }
+  strong { color: var(--text); font-weight: 700; }
+  code, .m { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  code {
+    font-size: 13px;
+    background: var(--line-2);
+    color: var(--soft);
+    padding: 1px 6px;
+  }
+
+  header { display: flex; flex-direction: column; gap: 14px; padding-block: 26px 12px; }
+  .brandline { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
+  .glyph { flex: 0 0 auto; }
+  .kicker { font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: 0.14em; }
+  .lede { font-size: 17px; color: var(--soft); max-width: 62ch; }
+
+  section { padding-block: 30px 0; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+  .num {
+    font-family: var(--mono); font-size: 25px; font-weight: 700;
+    color: var(--stencil); letter-spacing: 0.04em; flex: 0 0 auto;
+  }
+  .sec-note { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
+
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .panel-hi { border-left: 3px solid var(--orange); }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    color: var(--ink);
+    align-self: flex-start;
+  }
+  .t-orange { background: var(--orange); }
+  .t-red { background: var(--red); }
+  .t-green { background: var(--green); }
+  .t-blue { background: var(--blue); }
+  .t-grey { background: var(--muted); }
+
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 3px 0; }
+  li::marker { color: var(--stencil); }
+  .tight li { margin: 1px 0; }
+
+  .steps { counter-reset: step; display: flex; flex-direction: column; gap: 10px; list-style: none; padding: 0; margin: 0; }
+  .steps li {
+    counter-increment: step;
+    display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start;
+    border-bottom: 1px dashed var(--line-2); padding-bottom: 10px;
+  }
+  .steps li:last-child { border-bottom: 0; padding-bottom: 0; }
+  .steps li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--orange);
+  }
+
+  .formula {
+    font-family: var(--mono); font-size: 14px; line-height: 1.9;
+    background: var(--panel-2); border: 1px solid var(--line);
+    padding: 13px 15px; color: var(--soft);
+    overflow-x: auto;
+  }
+  .formula b { color: var(--text); }
+
+  .band { display: flex; border: 1px solid var(--line); overflow: hidden; }
+  .band > div { flex: 1 1 0; padding: 9px 11px; font-family: var(--mono); font-size: 12px; text-align: center; color: var(--ink); font-weight: 700; }
+  .band .b1 { background: var(--red); }
+  .band .b2 { background: var(--orange); }
+  .band .b3 { background: var(--green); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  .scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; color: var(--muted); letter-spacing: 0.08em; border-bottom: 2px solid var(--line); font-weight: 600; }
+  td.m { color: var(--soft); white-space: nowrap; }
+
+  .cta {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); padding: 16px 18px;
+  }
+  .btn {
+    font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: 0.06em;
+    background: var(--orange); color: var(--ink); text-decoration: none;
+    padding: 10px 18px;
+    clip-path: polygon(0 0, 100% 0, 100% 70%, 96% 100%, 0 100%);
+  }
+  .btn-ghost { background: transparent; color: var(--orange); border: 1px solid var(--orange); clip-path: none; }
+  .btn:focus-visible, a:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+
+  .fineprint { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  footer { margin-top: 34px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+
+<div class="tape"></div>
+<div class="wrap">
+
+  <header>
+    <div class="brandline">
+      <svg class="glyph" width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
+        <path d="M14 3 L26 24 H2 Z" fill="none" stroke="#f08a24" stroke-width="2.5"></path>
+        <path d="M14 11 V17 M14 20 V21" stroke="#f08a24" stroke-width="2.5"></path>
+      </svg>
+      <h1>RTOKEN STRESS DESK</h1>
+    </div>
+    <p class="kicker">开仓前的压力测试台 · 每个数字都有来源 · 最终由你决定</p>
+    <p class="lede">
+      你打算开的这个仓位，<strong>如果放回过去 5 年的每一天</strong>，哪一天会让你爆仓？
+      这个网站把你的持仓丢进 1,250 多个真实交易日里重演一遍，告诉你最惨的那天亏多少、离强平还有多远，
+      然后给出「怎么调才安全」的具体方案。
+    </p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="num">01</span><h2>它做什么，不做什么</h2></div>
+    <div class="grid-2">
+      <div class="panel panel-hi">
+        <span class="tag t-green">它做这些</span>
+        <ul class="tight">
+          <li>用<strong>真实历史行情</strong>算你的持仓在极端行情下亏多少</li>
+          <li>算出离强平还有多远，给一个 0–100 的安全分</li>
+          <li>告诉你缩仓到多少、换什么保证金能把分数拉上来</li>
+          <li>每个数字都能点开看是哪次数据调用算出来的</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <span class="tag t-red">它不做这些</span>
+        <ul class="tight">
+          <li>不预测涨跌，不告诉你该买什么</li>
+          <li>不自动下单（按钮只是帮你跳到 Bitget 页面）</li>
+          <li>不做新闻和政策解读——那类内容没法逐句溯源</li>
+          <li>不替你做决定：所有结论都是「历史上发生过什么」</li>
+        </ul>
+      </div>
+    </div>
+    <p class="fineprint" style="margin-top:12px;">
+      为什么需要它：代币化美股（rToken）是 <strong>7×24 交易</strong>的，但正股周末不开盘。
+      周末的价格由做市商报价，等美股开盘时重新锚定——<strong>你的杠杆仓位在周末就可能被强平，哪怕周一价格又回来了。</strong>
+      而且加密抵押品（BTC/ETH）和美股仓位常常同一天一起挨打：2024-08-05 那天，11 只主流标的平均盘中 −11.7%，同日 BTC −20.0%、ETH −28.9%。
+    </p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">02</span><h2>30 秒上手</h2><span class="sec-note">不用注册 · 不用装东西</span></div>
+    <div class="panel">
+      <ol class="steps">
+        <li><div>打开网址。页面会<strong>自动跑一次示例组合</strong>（约 10 秒），你直接就能看到结果长什么样。</div></li>
+        <li><div>看最上面那张<strong>「地震图」</strong>：每一根向下的红线 = 那一个交易日你的账户会亏多少。最深的几根标了日期。底部的黄黑警示带就是<strong>强平线</strong>。</div></li>
+        <li><div>往下看<strong>安全总分</strong>（0–100）和「强平距离尺」：三个情景各用掉了多少强平距离，最差的那个决定总分。</div></li>
+        <li><div>右边<strong>「调整方案」</strong>给了几个具体改法，每个都标了改完总分从多少变成多少。点「去 Bitget」会打开对应的交易页面——<strong>只是打开页面，不会下单</strong>。</div></li>
+        <li><div>想改持仓？在表格里直接改，或者<strong>用一句话问</strong>：<code>把 MSTR 砍半呢</code>、<code>BTC 全部换成 USDT 呢</code>、<code>halve MSTR</code> 都认。</div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">03</span><h2>三个标签页</h2></div>
+    <div class="stack">
+
+      <div class="panel">
+        <span class="tag t-orange">组合</span>
+        <h3>把整个账户放回过去 5 年</h3>
+        <p>Bitget 的统一账户是<strong>全仓</strong>的：强平只看总权益和总维持保证金，<strong>单笔开几倍杠杆不决定风险，总名义仓位才决定</strong>。所以这里测的是整个组合，不是单笔。</p>
+        <ul class="tight">
+          <li><strong>怎么输入</strong>：一句话描述（中英文都行），或者在表格里逐行填——标的、杠杆还是现货、做多做空、买入价、数量。买入价填了就会算浮盈浮亏。</li>
+          <li><strong>能填多少标的</strong>：1,601 只 rToken（Bitget 上架 + Yahoo 有 5 年日线的）。其中 203 只有永续合约可以加杠杆，其余只能按现货持有。</li>
+          <li><strong>数量可以是零碎的</strong>：0.005 股也行——买不起整股正是代币化美股的意义。（Bitget 的精度是 4 位小数，单笔最小 10 USDT）</li>
+          <li><strong>两种口径</strong>：「各资产最差价同时出现」偏保守，「收盘价」偏乐观，真实情况在两者之间——两个都给你。</li>
+          <li><strong>还会算</strong>：连续持有 1–5 天的最差累计回撤、4 个预设假设情景、所有仓位同步跌多少会强平。</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="tag t-blue">单笔</span>
+        <h3>一笔交易想法，过周末会怎样</h3>
+        <p>输入像 <code>周五收盘前我想 3 倍做多 NVDA rToken 过周末</code> 或 <code>3x long NVDA over the weekend</code> 这样一句话。</p>
+        <ul class="tight">
+          <li><strong>周末重锚跳空</strong>：用 rToken 自己的真实小时线，算每个周五收盘 → 周一开盘的跳空</li>
+          <li><strong>5 年隔夜尾部</strong>：正股最差单日、≥10% 开盘跳空出现过几次、按你的杠杆会不会被打到强平</li>
+          <li><strong>只覆盖 11 只</strong>（NVDA / TSLA / AAPL / MSFT / AMZN / GOOGL / META / SPY / QQQ / COIN / MSTR）——这个算法要 rToken 的小时线，本地只存了这几只。其他标的用「组合」模式测。</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <span class="tag t-grey">雷达</span>
+        <h3>开仓前先看一眼市场温度</h3>
+        <ul class="tight">
+          <li>VIX（美股波动率）+ 它在 5 年里的百分位</li>
+          <li>BTC / ETH 波动率指数 DVOL（Deribit 官方）+ 百分位</li>
+          <li>加密恐惧贪婪指数、加密总市值、BTC 占比</li>
+          <li><strong>价格交叉核对</strong>：BTC/ETH 用三个来源、美股用两个来源对一遍，对不上会标黄</li>
+          <li>你持仓标的的<strong>下次财报日</strong>——财报是隔夜跳空最常见的来源</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">04</span><h2>安全分怎么算</h2><span class="sec-note">公式公开 · 没有人为权重</span></div>
+    <div class="stack">
+      <div class="formula">
+        每项得分 = 100 × ( 1 − <b>情景亏损</b> ÷ <b>开仓时离强平的距离</b> )，截断到 0–100<br>
+        情景里触及强平 = 0 分<br>
+        <b>总分 = 三项里最低的那一项</b>（短板决定风险，取平均会把致命风险稀释掉）
+      </div>
+      <div class="band">
+        <div class="b1">0–29　危险</div>
+        <div class="b2">30–59　警惕</div>
+        <div class="b3">60–100　稳健</div>
+      </div>
+      <p class="fineprint">
+        三项分别是：<strong>单日极端行情</strong>（5 年逐日重演）、<strong>连续 5 日下跌</strong>（每个起点持有 1–5 天）、<strong>预设双重打击情景</strong>。
+        如果你的仓位<strong>全是现货</strong>，那就不存在强平——这时分母换成初始权益，分数的含义变成「最坏情况下亏掉多少本金」，页面上的措辞也会跟着改。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">05</span><h2>为什么这些数字可以信</h2></div>
+    <div class="grid-2">
+      <div class="panel">
+        <span class="tag t-orange">三条硬规矩</span>
+        <ul class="tight">
+          <li><strong>大模型不产生任何数字</strong>。它只负责把你的话翻译成操作指令，所有计算由代码完成。</li>
+          <li>大模型写的结论会被<strong>逐个数字核对</strong>，对不上事实表就整段弃用、退回模板。</li>
+          <li>每一次外部取数都写进<strong>哈希链日志</strong>：改动中间任何一条，顶栏立刻显示「链断裂」。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <span class="tag t-grey">数据来自哪</span>
+        <div class="scroll">
+          <table>
+            <tr><th>内容</th><th>来源</th></tr>
+            <tr><td class="m">美股 / BTC / ETH 日线</td><td>Yahoo Finance</td></tr>
+            <tr><td class="m">rToken 小时线</td><td>Bitget 公共接口</td></tr>
+            <tr><td class="m">BTC/ETH 波动率</td><td>Deribit</td></tr>
+            <tr><td class="m">加密市值 / 价格</td><td>CoinGecko</td></tr>
+            <tr><td class="m">恐惧贪婪指数</td><td>alternative.me</td></tr>
+            <tr><td class="m">财报日历</td><td>Nasdaq</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">06</span><h2>必须知道的局限</h2><span class="sec-note">这些都写在页面里，没有藏着</span></div>
+    <div class="panel">
+      <ul class="tight">
+        <li><strong>维持保证金率和 BTC/ETH 折算率是你自己设的假设值</strong>，不是 Bitget 官方数值；分档维持保证金没有建模。</li>
+        <li><strong>没计手续费、资金费、滑点、强平罚金</strong>。</li>
+        <li>周末重锚的样本只有 12 个周末（rToken 真实周末交易 2026-06 才开始）——只能当案例看，不是统计结论。</li>
+        <li>BTC/ETH 是 UTC 日线、美股是纽约交易日，<strong>同日对齐是近似</strong>。</li>
+        <li>历史上那些日期当天发生了什么事件<strong>未经核实</strong>，工具不写原因。</li>
+        <li><strong>历史不代表未来。这不是投资建议。</strong></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="num">07</span><h2>开始试</h2></div>
+    <div class="cta">
+      <a class="btn" href="https://rtoken-stress-desk-8vvpa58i5ikdzpwbucdxdg.streamlit.app/?demo=1">打开网站（自动跑一次示例）</a>
+      <a class="btn btn-ghost" href="https://github.com/IvanChong08/rToken-Stress-Desk">看源码</a>
+    </div>
+    <p class="fineprint" style="margin-top:12px;">
+      手机上也能开，但这是个数据密集的看板，<strong>电脑上看体验好很多</strong>。
+      第一次打开如果显示「应用在休眠」，点一下唤醒按钮等 30 秒左右。
+      如果提示没有访问权限，说明应用被设成私有了——找 Ivan 用邮箱邀请你。
+    </p>
+    <footer>
+      <p class="fineprint">
+        为 Bitget AI Hackathon Genesis S2「决策压力测试」做的。MIT 开源。
+        有任何看着不对的地方——尤其是<strong>某个数字你觉得算错了</strong>——直接告诉 Ivan，页面上每个数字都能翻到它的来源。
+      </p>
+    </footer>
+  </section>
+
+</div>
+<div class="tape-thin"></div>
+
+</body>
+</html>

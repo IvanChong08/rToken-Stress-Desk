@@ -98,7 +98,8 @@ def validate_account(a: Account) -> str | None:
             return "不支持的标的: %r (支持 %s)" % (p.symbol, universe.describe())
         if p.kind == "leverage" and p.symbol not in universe.LEVERAGE:
             # Bitget 只给一部分 rToken 上了 USDT 永续; 没有合约就只能现货持有, 不能开杠杆
-            return "%s 在 Bitget 没有永续合约, 只能按现货持有 —— 把「类型」改成现货" % p.symbol
+            return ("%s 在 Bitget 没有永续合约, 只能按现货持有 —— 表格里把「类型」改成现货, "
+                    "或者换个说法: 「现货买入 %s 1万」" % (p.symbol, p.symbol))
         if p.side not in ("long", "short"):
             return "%s 的方向必须是 long 或 short" % p.symbol
         if p.kind not in ("leverage", "spot"):

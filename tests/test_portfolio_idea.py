@@ -83,5 +83,34 @@ check("ETH 换 USDT", (summary(a)[:2], a.eth), ((10000, 0.1), 0.0))
 a = parse_rules("0.5 ETH 和 3000U 做保证金, 做多 NVDA 1万")
 check("解析 ETH 保证金", (summary(a), a.eth), ((3000, 0, (("NVDA", "long", 10000),)), 0.5))
 
+
+# ---- 现货 / 中文俗称 / 读不懂的片段要出声 (09-17 Ivan 实测: 「现货买进台积电 1万」整段被静默丢掉) ----
+from desk.idea import ALIASES                                                        # noqa: E402
+from desk.portfolio_idea import parse_rules_verbose, unparsed_segments, understand   # noqa: E402
+
+T = "保证金 2万U, 多英伟达 1.5万, 多特斯拉 1万, 空纳指 1万, 现货买进台积电 1万"
+acc = parse_rules(T)
+got = sorted((p.symbol, p.side, p.kind, int(p.notional)) for p in (acc.positions if acc else []))
+check("中文俗称 + 现货全都认出来", got,
+      [("NVDA", "long", "leverage", 15000), ("QQQ", "short", "leverage", 10000),
+       ("TSLA", "long", "leverage", 10000), ("TSM", "long", "spot", 10000)])
+check("保证金没被现货那段带偏", acc.usdt if acc else None, 20000.0)
+check("现货只作用于它那一段", [p.kind for p in acc.positions if p.symbol == "NVDA"], ["leverage"])
+check("台积电有别名", ALIASES.get("台积电"), "TSM")
+
+# 读不懂的片段: 必须报出来, 不能悄悄少算一笔
+miss = unparsed_segments("保证金2万U, 多英伟达1.5万, 买点我瞎编的东西 1万")
+check("没看懂的片段被抓出来", len(miss), 1)
+check("保证金片段不算漏掉", unparsed_segments("保证金 2万U, 做多 NVDA 1万"), [])
+check("没有金额的片段不算漏掉", unparsed_segments("做多 NVDA 1万, 谢谢"), [])
+
+# 读懂了但组合不合法 -> 立刻说原因, 不要绕大模型 (GLD 没有股票永续)
+a2, err2 = parse_rules_verbose("保证金2万U, 多英伟达1.5万, 买点黄金 1万")
+check("没永续的标的填杠杆 -> 报错", a2 is None and "没有永续合约" in err2, True)
+_, _, how2 = understand("保证金2万U, 多英伟达1.5万, 买点黄金 1万", base, 80000.0, 0.01, 0.95, 2500.0,
+                        budget_check=lambda: False)
+check("这个原因直接传给用户", "没有永续合约" in how2, True)
+check("现货写法能通过", parse_rules("2万U 保证金, 现货买入黄金 1万") is not None, True)
+
 print("\n%s" % ("全部通过" if not fails else "%d 项失败" % fails))
 sys.exit(1 if fails else 0)

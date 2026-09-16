@@ -76,19 +76,53 @@ def _extract_collateral(t: str) -> tuple[str, float, float, float]:
     return _COLL.sub(" ", t), usdt, btc, eth
 
 
+_SPOT = r"现货|现价买入|spot"
+
+
+def split_segments(text: str) -> list[str]:
+    t = text.replace("，", ",").replace("；", ";").replace("、", ",")
+    return [s for s in re.split(r"[,;\n]|和|及|以及|另外|还有|\band\b", t) if s.strip()]
+
+
+def unparsed_segments(text: str) -> list[str]:
+    """
+    有金额、却一个标的都没认出来的片段 —— 这些必须告诉用户, 不能悄悄扔掉。
+    09-17 Ivan 实测: 「现货买进台积电 1万」整段被丢了, 页面还说「由规则解析为新组合」, 像是全读懂了。
+    """
+    t, _, _, _ = _extract_collateral(text.replace("，", ",").replace("；", ";").replace("、", ","))
+    out = []
+    for seg in split_segments(t):
+        if _symbols_in(seg) or not re.search(r"\d", seg):
+            continue
+        if re.search(r"保证金|抵押|margin|collateral|杠杆|倍|维持", seg.lower()):
+            continue                                    # 保证金/杠杆片段本来就不该有标的
+        out.append(seg.strip(" ,;"))
+    return out
+
+
 def parse_rules(text: str, maint_margin: float = 0.01, btc_haircut: float = 0.95) -> Account | None:
+    return parse_rules_verbose(text, maint_margin, btc_haircut)[0]
+
+
+def parse_rules_verbose(text: str, maint_margin: float = 0.01,
+                        btc_haircut: float = 0.95) -> tuple[Account | None, str]:
+    """和 parse_rules 一样, 但把「读懂了、可是组合不合法」的原因带出来 (例如这只票没有永续却填了杠杆)。"""
     t = text.replace("，", ",").replace("；", ";").replace("、", ",")
     t, usdt, btc, eth = _extract_collateral(t)
     # 3. 仓位: 按分隔符切片, 方向词向后沿用
-    segs = [s for s in re.split(r"[,;\n]|和|及|以及|另外|还有|\band\b", t) if s.strip()]
+    segs = split_segments(t)
     side = "long"
-    pos: dict[tuple[str, str], float] = {}
+    pos: dict[tuple[str, str, str], float] = {}
     for seg in segs:
         syms = _symbols_in(seg)
         if re.search(_SIDE_SHORT, seg.lower()):
             side = "short"
         elif re.search(_SIDE_LONG, seg.lower()):
             side = "long"
+        # 「现货」只作用于本片段: 「多英伟达 1.5万, 现货买进台积电 1万」里只有台积电是现货
+        kind = "spot" if re.search(_SPOT, seg.lower()) else "leverage"
+        if kind == "spot":
+            side = "long"                               # 现货没有做空
         if not syms:
             continue
         # 一个片段里多个标的: 每个标的取它后面最近的金额
@@ -96,9 +130,14 @@ def parse_rules(text: str, maint_margin: float = 0.01, btc_haircut: float = 0.95
             end = syms[k + 1][0] if k + 1 < len(syms) else len(seg)
             m = re.search(_AMOUNT, seg[i + len(sym):end] if seg[i:i + len(sym)].upper() == sym else seg[i:end])
             if m:
-                pos[(sym, side)] = pos.get((sym, side), 0.0) + _num(m.group(1), m.group(2))
-    a = Account([Position(s, sd, n) for (s, sd), n in pos.items()], usdt, btc, maint_margin, btc_haircut, eth, btc_haircut)
-    return None if validate_account(a) else a
+                pos[(sym, side, kind)] = pos.get((sym, side, kind), 0.0) + _num(m.group(1), m.group(2))
+    a = Account([Position(s, sd, n, kd) for (s, sd, kd), n in pos.items()],
+                usdt, btc, maint_margin, btc_haircut, eth, btc_haircut)
+    err = validate_account(a)
+    if not err:
+        return a, ""
+    # 一个标的都没认出来 = 这句话规则读不懂 (交给大模型); 认出来了但不合法 = 把原因带回去告诉用户
+    return None, ("" if not pos else err)
 
 
 # 用户常提到、但本工具还没接入的资产 (识别出来要明确告诉用户, 不能悄悄忽略)
@@ -541,10 +580,19 @@ def understand(text: str, account: Account, btc_price: float, maint_margin: floa
     ask = clarify(text)                             # 缺金额 / 单位不明 / 统称没有公认定义 -> 直接反问, 不猜
     if ask:
         return None, [], (("%s。" % gnote) if gnote else "") + ask
-    quick = parse_rules(text, maint_margin, btc_haircut)
+    quick, quick_err = parse_rules_verbose(text, maint_margin, btc_haircut)
     if quick is not None:
         note = "由规则解析为新组合" + (("。" + gnote) if gnote else "")
+        # 读不懂的片段要说出来 —— 悄悄少算一笔仓位, 比看不懂整句话更危险
+        missed = unparsed_segments(text)
+        if missed:
+            note += "。⚠️ 这部分没看懂, 没有计入: 「%s」(可以改成「现货买入 台积电 1万」这种写法, 或直接在下面的表格里加一行)" \
+                    % "」「".join(missed)
         return quick, [], note + (("。⚠️ " + bad + ", 已忽略") if bad else "")
+    if quick_err:
+        # 规则已经读懂了, 只是组合本身不合法 (例如这只票没有永续却填了杠杆) ——
+        # 直接把原因说清楚, 不用再等大模型 9–40 秒绕一圈得到同样的结论
+        return None, [], quick_err
     payload = {"current_portfolio": {"usdt": account.usdt, "btc": account.btc, "eth": account.eth,
                                      "positions": [{"symbol": p.symbol, "side": p.side, "notional": p.notional}
                                                    for p in account.positions]},

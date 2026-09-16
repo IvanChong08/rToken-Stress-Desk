@@ -20,11 +20,30 @@ from . import universe
 # 单笔模式还要用本地缓存的 rToken 小时线算周末重锚, 所以只覆盖 TRADE_SUPPORTED 那几只。
 SUPPORTED = universe.SUPPORTED
 TRADE_SUPPORTED = universe.CACHED
-ALIASES = {
+# 中文俗称 -> 代码。标的扩到 1,600 多只后, 光靠代码认不够用: 中文用户会直接打「台积电」。
+# 只保留能对上清单的 (末尾按 universe.SUPPORTED 过滤一遍), 免得别名指向一个测不了的标的。
+_ALIAS_RAW = {
     "英伟达": "NVDA", "辉达": "NVDA", "特斯拉": "TSLA", "苹果": "AAPL", "微软": "MSFT", "亚马逊": "AMZN",
     "谷歌": "GOOGL", "google": "GOOGL", "脸书": "META", "facebook": "META", "标普": "SPY", "纳指": "QQQ",
     "纳斯达克": "QQQ", "coinbase": "COIN", "微策略": "MSTR", "strategy": "MSTR",
+    # 半导体 / 硬件
+    "台积电": "TSM", "台积": "TSM", "阿斯麦": "ASML", "英特尔": "INTC", "超微半导体": "AMD", "超威": "AMD",
+    "美光": "MU", "高通": "QCOM", "博通": "AVGO", "超微电脑": "SMCI", "戴尔": "DELL", "惠普": "HPQ", "思科": "CSCO",
+    # 中概
+    "阿里巴巴": "BABA", "阿里": "BABA", "京东": "JD", "拼多多": "PDD", "百度": "BIDU", "网易": "NTES",
+    "蔚来": "NIO", "小鹏": "XPEV", "理想": "LI",
+    # 软件 / 平台
+    "甲骨文": "ORCL", "奈飞": "NFLX", "网飞": "NFLX", "迪士尼": "DIS", "帕兰提尔": "PLTR", "robinhood": "HOOD",
+    # 消费 / 工业 / 医药
+    "可口可乐": "KO", "麦当劳": "MCD", "星巴克": "SBUX", "耐克": "NKE", "沃尔玛": "WMT", "波音": "BA",
+    "礼来": "LLY", "辉瑞": "PFE", "强生": "JNJ", "联合健康": "UNH", "索尼": "SONY", "丰田": "TM",
+    # 金融
+    "摩根大通": "JPM", "高盛": "GS", "摩根士丹利": "MS", "贝莱德": "BLK", "嘉信": "SCHW",
+    "美国银行": "BAC", "花旗": "C", "富国": "WFC",
+    # ETF
+    "道指": "DIA", "罗素": "IWM", "半导体etf": "SOXX", "黄金": "GLD", "白银": "SLV", "原油": "USO",
 }
+ALIASES = {k: v for k, v in _ALIAS_RAW.items() if v in SUPPORTED}
 SCENARIOS = {"weekend", "overnight"}
 
 
