@@ -13,6 +13,7 @@ import json
 import re
 
 from . import llm
+from . import universe
 from .idea import ALIASES, SUPPORTED
 from .portfolio import Account, Position, validate_account
 
@@ -39,8 +40,11 @@ def _symbols_in(seg: str) -> list[tuple[int, str]]:
         if i >= 0:
             found.append((i, sym))
     for m in re.finditer(r"(?<![A-Za-z])R?([A-Za-z]{2,5})(?:USDT)?(?![A-Za-z])", seg):
-        if m.group(1).upper() in SUPPORTED:
-            found.append((m.start(), m.group(1).upper()))
+        w = m.group(1)
+        # 支持的标的从 11 只涨到上千只后, 小写英文词会大量撞上代码 (all/now/open/hood/app/key...)。
+        # 规则: 小写只认最常用的那几只 (nvda/tsla...), 其余必须大写 —— 代码本来就是大写写的。
+        if w.upper() in SUPPORTED and (w.isupper() or w.upper() in universe.CACHED):
+            found.append((m.start(), w.upper()))
     seen, out = set(), []
     for i, s in sorted(found):
         if s not in seen:
@@ -169,8 +173,8 @@ def clarify(text: str) -> str | None:
     qs = []
     if any(w in low for w in AMBIGUOUS_GROUPS) and not _symbols_in(text):
         m = re.search(r"[\d一二两三四五六七八九十]?\s*大?\s*(?:%s)" % "|".join(AMBIGUOUS_GROUPS), text)
-        qs.append("「%s」这种统称没有公认定义, 请直接说是哪几只 (目前支持 %s; 如果你指的是「七巨头」, 我可以直接认)"
-                  % (m.group(0).strip() if m else next(w for w in AMBIGUOUS_GROUPS if w in low), ", ".join(sorted(SUPPORTED))))
+        qs.append("「%s」这种统称没有公认定义, 请直接说是哪几只 (%s; 如果你指的是「七巨头」, 我可以直接认)"
+                  % (m.group(0).strip() if m else next(w for w in AMBIGUOUS_GROUPS if w in low), universe.describe()))
     # 「0.05 保证金」这种没写单位, 而句子里又提到 BTC/ETH -> 不猜, 反问
     m = re.search(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:做|作|当)?\s*(?:保证金|抵押)", text)
     if m and not re.search(r"\d\s*(?:u\b|usdt|刀|美元|美金|万|k)\s*(?:做|作|当)?\s*(?:保证金|抵押)", low) \
@@ -222,8 +226,7 @@ def unsupported_message(text: str) -> str | None:
     if crypto:
         parts.append("「%s」暂不支持: 保证金目前只支持 USDT、BTC 和 ETH, 仓位只支持美股 rToken" % "、".join(crypto))
     if stocks:
-        parts.append("「%s」暂不支持: 目前只接入了 %d 只美股 rToken (%s)" % ("、".join(stocks), len(SUPPORTED),
-                                                                 ", ".join(sorted(SUPPORTED))))
+        parts.append("「%s」暂不支持: %s" % ("、".join(stocks), universe.describe()))
     return "; ".join(parts)
 
 
@@ -232,10 +235,10 @@ SYSTEM_PROMPT = """你是持仓解析器。把用户描述的跨资产统一账�
   usdt       作保证金的 USDT 数量, 没说填 0
   btc        作保证金的 BTC 数量 (个数, 不是价值), 没说填 0
   eth        作保证金的 ETH 数量 (个数, 不是价值), 没说填 0; ETH 不能作仓位
-  symbol     只能是: %s (rToken 如 RNVDAUSDT 填 NVDA)
+  symbol     美股/ETF 代码 (rToken 如 RNVDAUSDT 填 NVDA), 如 %s; 拿不准就不要放进 positions
   side       "long" 或 "short"
   notional   仓位名义价值 (USDT)。「1.5万」= 15000。用户只说了保证金和杠杆时, 名义价值 = 保证金 x 杠杆
-规则: 只转写用户给出的数字, 不要编造; 标的不在列表里就不要放进 positions。""" % ", ".join(sorted(SUPPORTED))
+规则: 只转写用户给出的数字, 不要编造。""" % universe.sample()
 
 
 def _from_json(d: dict, maint_margin: float, btc_haircut: float) -> Account:
@@ -513,10 +516,10 @@ ops 可用:
   {"op": "allocate", "budget_asset": "BTC", "budget": 0.1, "symbols": ["NVDA", "AAPL", "MSFT"], "side": "long"}
       用一笔预算等额买入多个标的 (预算单位 USDT / BTC / ETH; 换算成 USDT 和等额分配都由代码完成, 你不要算)
 规则:
-- symbol 只能是: %s; side 省略表示该标的所有方向
+- symbol 是美股/ETF 代码 (如 %s); side 省略表示该标的所有方向
 - 数值只能来自用户原话 (「一半」=0.5, 「全部」=1, 「1.5万」=15000, 「减三成」=0.7); 不要编数字, 不要算价格
 - ETH 只能作保证金, 不能作仓位
-- 不支持的资产 (如 SOL、AMD) 不要放进 ops 或 portfolio, 在 reason 里说明""" % ", ".join(sorted(SUPPORTED))
+- 加密货币 (如 SOL、DOGE) 不能作仓位, 不要放进 ops 或 portfolio, 在 reason 里说明""" % universe.sample()
 
 
 def understand(text: str, account: Account, btc_price: float, maint_margin: float = 0.01, btc_haircut: float = 0.95,

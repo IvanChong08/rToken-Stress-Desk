@@ -34,3 +34,24 @@ def ohlcv(symbol: str, range_: str = "5y", interval: str = "1d", timeout: float 
         return None, Provenance("yahoo", url, {"symbol": symbol, **params}, time.time(),
                                 int((time.time() - t0) * 1000), False,
                                 error="%s: %s" % (type(e).__name__, str(e)[:200]))
+
+
+def last_price(symbol: str, timeout: float = 20.0):
+    """最新成交价 (含盘前盘后), 返回 (价格 | None, Provenance)。
+    判别「币股同名」时要用实时价: 拿昨收去比, 盘前一动就会把股票永续误判成币。"""
+    url = URL.format(symbol=symbol)
+    params = {"range": "1d", "interval": "1d"}
+    t0 = time.time()
+    try:
+        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+        r.raise_for_status()
+        meta = r.json()["chart"]["result"][0]["meta"]
+        px = meta.get("regularMarketPrice")
+        if px is None:
+            raise ValueError("meta 里没有 regularMarketPrice")
+        return float(px), Provenance("yahoo", url, {"symbol": symbol, **params}, time.time(),
+                                     int((time.time() - t0) * 1000), True, n_records=1)
+    except Exception as e:
+        return None, Provenance("yahoo", url, {"symbol": symbol, **params}, time.time(),
+                                int((time.time() - t0) * 1000), False,
+                                error="%s: %s" % (type(e).__name__, str(e)[:200]))

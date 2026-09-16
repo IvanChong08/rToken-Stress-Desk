@@ -39,7 +39,9 @@ python -m streamlit run app.py
 ## 三个模式
 
 ### 📊 组合压力测试（跨资产统一账户）
-多只 rToken 杠杆仓位 + USDT / BTC / ETH 抵押品。全仓下**强平只看总权益与总维持保证金，单笔杠杆不决定风险，名义仓位才决定**。
+多只 rToken 仓位（杠杆或现货）+ USDT / BTC / ETH 抵押品。全仓下**强平只看总权益与总维持保证金，单笔杠杆不决定风险，名义仓位才决定**。
+
+**支持 1141 只标的**——Bitget 上架的全部 rToken 中，Yahoo 有 5 年日线的那些；其中 **198 只有股票永续合约、可以加杠杆**，其余只能按现货持有（填了杠杆会被拦下来并告诉你改成现货）。清单由 `tools/fetch_rtoken_universe.py` 生成，见「标的清单怎么来的」。
 
 - **5 年逐日重演**（约 1,250 个交易日）：两种口径——「各资产最差价同时出现」（保守上限）和「收盘价」（乐观下限）
 - **连续多日回撤**：每个起点持有 1–5 个交易日的最差权益
@@ -56,7 +58,7 @@ python -m streamlit run app.py
 | 同步下跌多少会强平 | 加密抵押品跟跌 29.7% / 不动 36.2% | — |
 
 ### 🎯 单笔想法
-一句话描述，例如「周五收盘前我想 3 倍做多 NVDA rToken 过周末」：
+一句话描述，例如「周五收盘前我想 3 倍做多 NVDA rToken 过周末」。**只覆盖 11 只**（NVDA / TSLA / AAPL / MSFT / AMZN / GOOGL / META / SPY / QQQ / COIN / MSTR）——周末重锚要用 rToken 的真实小时线，本地只缓存了这几只；其他标的用组合模式测（正股日线重演，不需要小时线）。
 
 - **周末重锚跳空**：rToken 真实周末交易（2026-06 起）的每个周五收盘 → 周一开盘
 - **5 年隔夜尾部**：正股最差单日（前收 → 当日极值）、≥10% 开盘跳空次数、按你的杠杆算强平命中
@@ -76,6 +78,18 @@ python -m streamlit run app.py
 | 持仓标的下次财报日 | Nasdaq 财报日历（约未来 50 天）；更远按历史财报间隔推算并标「估算」 |
 
 **不做新闻、政策解读、资金流**：无法逐句溯源，且与交易所自带的 AI 助手重复。
+
+---
+
+## 标的清单怎么来的
+
+`data/rtoken_universe.json`（快照 2026-09-16）由三步生成，全部可复现：
+
+1. **Bitget 现货**：`/api/v2/spot/public/symbols` 里 `baseCoin` 以 `r` 开头的全部上架交易对 —— 1173 只（本机连不上 Bitget，这步在 AWS 上跑）
+2. **Yahoo 核对**：逐只查 5 年日线，**1141 只有**、32 只没有（多为新上市或已退市），没有的不收录 —— 取不到行情就没法压力测试
+3. **能不能加杠杆**：Bitget 的合约里股票永续和币永续同名同构，API 没有字段能分开，而**币股同名很常见**——`BCHUSDT` 是比特币现金，但 Bitget 同时上了智利银行（BCH）的 rToken；`SUI`、`T`、`F`、`W`、`NMR` 都一样。所以用**价格判**：合约最新价 vs 正股实时价，差 ≤10% 判为股票永续（198 只），差 ≥40% 判为同名的币（27 只），**中间地带不下结论**（2 只：CL、NMR），一律按「不能加杠杆」处理
+
+⚠️ 清单按**代码**直接对应 Yahoo，没有逐只核对公司名——理论上存在 Bitget 的 rXYZ 与 Yahoo 的 XYZ 不是同一家公司的可能。
 
 ---
 
@@ -174,6 +188,8 @@ export LLM_DAILY_CAP=120
 - BTC-USD / ETH-USD 是 UTC 日线，美股是纽约交易日，**同日对齐是近似**
 - 预设情景里 BTC 和 ETH 按同幅变动，是简化
 - 历史日期发生了什么事件**未核实**，本工具不写原因
+- **标的清单是快照**（2026-09-16），Bitget 上下架后不会自动更新；重跑 `tools/fetch_rtoken_universe.py` 才会变
+- **标的与 Yahoo 的对应按代码直接匹配**，未逐只核对公司名
 - **历史不代表未来。本工具不是投资建议。**
 
 ---
@@ -190,6 +206,9 @@ python tests/test_links.py                  # 调整步骤与 Bitget 链接
 python tests/test_verifier.py               # 大模型数字核对器
 python tests/test_calllog_concurrency.py    # 哈希链并发写入
 python tests/test_budget.py                 # 大模型用量闸门
+python tests/test_universe.py               # 标的清单（三个集合的关系、小写英文词不当代码）
+python tests/test_holdings.py               # 持仓表格解析（买入价 / 数量 / 现货）
+python tests/test_spot_only.py              # 全现货零保证金账户
 python tests/test_app.py                    # Streamlit 全流程（无浏览器）
 ```
 

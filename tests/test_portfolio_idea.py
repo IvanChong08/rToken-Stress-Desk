@@ -67,7 +67,9 @@ from desk.portfolio_idea import unsupported_mentions, unsupported_message  # noq
 check("没有 ETH 时 ETH 换 USDT 不改组合", edit("ETH 全部换成 USDT 呢", base, 80000, 2500)[0], None)
 check("ETH 已支持作保证金, 不再报不支持", unsupported_mentions("ETH 全部换成 USDT 呢"), [])
 check("识别不支持的币", unsupported_mentions("SOL 和狗狗币做保证金"), ["SOL", "DOGE"])
-check("识别不支持的股票代码", unsupported_mentions("做多 AMD 5000U 和 NVDA"), ["AMD"])
+# GOOG 是真实存在的代码, 但 Bitget 只上了 GOOGL 的 rToken —— 这种「差一个字母」的才是真会踩的坑
+check("识别不支持的股票代码", unsupported_mentions("做多 GOOG 5000U 和 NVDA"), ["GOOG"])
+check("扩容后 AMD 已支持, 不再误报", unsupported_mentions("做多 AMD 5000U 和 NVDA"), [])
 check("支持的标的与 USDT/BTC 不误报", unsupported_mentions("0.1 BTC 5000 USDT 做多 NVDA、RMSTRUSDT"), [])
 check("英文小写词不误报", unsupported_mentions("long NVDA 10k and short SPY as margin"), [])
 check("SOL 说明文字", unsupported_message("SOL 全部换成 USDT 呢"), "「SOL」暂不支持: 保证金目前只支持 USDT、BTC 和 ETH, 仓位只支持美股 rToken")

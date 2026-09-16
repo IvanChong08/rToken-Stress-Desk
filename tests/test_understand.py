@@ -70,8 +70,10 @@ a, _, err = run([{"op": "scale", "symbol": "NVDA", "factor": 0.35}], "NVDA 少�
 check("编造比例被拒", (a, "不在你的原话里" in (err or "")), (None, True))
 a, _, err = run([{"op": "remove", "symbol": "COIN"}], "平掉 COIN")
 check("删除不存在的仓位", (a, err), (None, "当前组合里没有 COIN"))
-a, _, err = run([{"op": "add", "symbol": "AMD", "notional": 5000}], "加 5000 AMD")
-check("不支持的标的", (a, err), (None, "不支持的标的: AMD"))
+a, _, err = run([{"op": "add", "symbol": "GOOG", "notional": 5000}], "加 5000 GOOG")
+check("不支持的标的", (a is None, "不支持的标的: GOOG" in (err or "")), (True, True))
+a, _, err = run([{"op": "add", "symbol": "AMD", "notional": 5000}], "加 5000 AMD")     # 扩容后 AMD 可用
+check("扩容后 AMD 能加进组合", (a is not None, err), (True, None))
 a, _, err = run([{"op": "set_collateral", "asset": "SOL", "value": 2}], "保证金改成 2 SOL")
 check("不支持的保证金", a is None and "暂不支持" in err, True)
 a, _, err = run([{"op": "add_collateral", "asset": "ETH", "value": 2}], "保证金加上 2 ETH")
