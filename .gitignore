@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+# 本地测试产生的调用日志 (含本机测试噪音); rToken 缓存 data/cache/ 需要提交, 线上 App 读它
+data/calls_*.jsonl
+data/*.lock
+data/llm_usage.json
+.streamlit/secrets.toml
