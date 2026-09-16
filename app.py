@@ -24,6 +24,7 @@ sys.path.insert(0, ROOT)
 from desk import budget  # noqa: E402
 from desk import card as cardmod  # noqa: E402
 from desk import llm, score, ui  # noqa: E402
+from desk import holdings  # noqa: E402
 from desk import links  # noqa: E402
 from desk import portfolio as pf  # noqa: E402
 from desk import portfolio_card as pcard  # noqa: E402
@@ -104,6 +105,27 @@ def get_radar(symbols: tuple, _log: CallLog) -> dict:
     return radarmod.radar(list(symbols), _log)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def get_prices(symbols: tuple) -> dict:
+    """持仓表要用的当前价 (算名义价值和未实现盈亏)。只取 5 天日线, 比取 5 年快得多。"""
+    if not symbols:
+        return {}
+    from concurrent.futures import ThreadPoolExecutor
+    from desk.sources import yahoo
+    out = {}
+    with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as ex:
+        for sym, (df, _prov) in zip(symbols, ex.map(lambda s: yahoo.ohlcv(s, "5d", "1d"), symbols)):
+            if df is not None and not df.empty:
+                out[sym] = float(df["close"].dropna().iloc[-1])
+    return out
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_crypto_prices() -> dict:
+    p = get_prices(("BTC-USD", "ETH-USD"))
+    return {"BTC": p.get("BTC-USD", 0.0), "ETH": p.get("ETH-USD", 0.0)}
+
+
 def html(fragment: str, target=None):
     (target or st).markdown(fragment, unsafe_allow_html=True)
 
@@ -164,8 +186,9 @@ with tab_pf:
     for j, q in enumerate(PF_FOLLOWUPS):
         if chips[len(PF_EXAMPLES) + j].button(q, width="stretch", key="pf_fu_%d" % j):
             st.session_state["pf_query"] = q
-    c_in, c_btn = st.columns([7, 1], vertical_alignment="bottom")
-    pq = c_in.text_input("用一句话描述持仓, 或者追问修改", key="pf_query", placeholder=PF_EXAMPLES[0])
+    c_in, c_btn = st.columns([8, 1], vertical_alignment="bottom")
+    pq = c_in.text_input("用一句话描述持仓, 或者追问修改", key="pf_query", placeholder=PF_EXAMPLES[0],
+                         label_visibility="collapsed")
     run_now = False
     if c_btn.button("解析 / 修改", key="pf_parse", width="stretch") and pq.strip():
         log = get_log()
@@ -193,19 +216,25 @@ with tab_pf:
         st.caption("解析: " + st.session_state["pf_how"])
 
     seismo_box = st.container(key="panel_00")          # 内容在算完报告后再填
-    c1, c2, c3 = st.columns([4, 5, 3], gap="medium")
 
-    with c1:
-        with st.container(key="panel_01"):
-            html(ui.panel_title("01", "持仓", "可直接编辑"))
+    with st.container(key="panel_01"):
+        html(ui.panel_title("01", "持仓", "买入价留空 = 当作刚开仓; 现货不占维持保证金, 但照样会亏"))
+        h_left, h_right = st.columns([7, 3], gap="medium")
+        with h_left:
             ver = st.session_state["pf_ver"]
-            df = pd.DataFrame([{"标的": p.symbol, "方向": p.side, "名义 USDT": p.notional} for p in acc.positions])
+            auto = st.checkbox("用 买价 × 数量 自动算名义价值 (取当前价)", value=True, key="pf_auto")
+            prices = get_prices(tuple(sorted({p.symbol for p in acc.positions})))
+            df = pd.DataFrame(holdings.position_rows(acc.positions, prices))
             edited = st.data_editor(
                 df, num_rows="dynamic", width="stretch", key="pf_editor_%d" % ver, hide_index=True,
                 column_config={
-                    "标的": st.column_config.SelectboxColumn(options=sorted(SUPPORTED), required=True),
-                    "方向": st.column_config.SelectboxColumn(options=["long", "short"], required=True),
-                    "名义 USDT": st.column_config.NumberColumn(min_value=0.0, step=500.0, format="%.0f", required=True),
+                    "标的": st.column_config.SelectboxColumn(options=sorted(SUPPORTED), required=True, width="small"),
+                    "类型": st.column_config.SelectboxColumn(options=["杠杆", "现货"], required=True, width="small"),
+                    "方向": st.column_config.SelectboxColumn(options=["做多", "做空"], required=True, width="small"),
+                    "买入价": st.column_config.TextColumn(width="small", help="留空 = 当作刚开仓 (浮盈浮亏按 0 算)"),
+                    "数量": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%g"),
+                    "名义 USDT": st.column_config.NumberColumn(min_value=0.0, step=500.0, format="%.0f",
+                                                             disabled=auto, help="勾了自动算时由 数量 × 当前价 得出"),
                 })
             u1, u2, u3 = st.columns(3)
             usdt = u1.number_input("USDT 保证金", min_value=0.0, value=float(acc.usdt), step=500.0, key="pf_usdt_%d" % ver)
@@ -218,13 +247,36 @@ with tab_pf:
             s2.slider("BTC/ETH 折算率 %", 50, 100, 95, 5, key="haircut_pct",
                       help="BTC、ETH 作保证金时按多少比例计入权益 (两者用同一个值, 这是简化)。你设定的假设值, 不是 Bitget 官方数值。")
             mm, haircut = mm_haircut()
-            rows = edited.dropna()
-            cur = pf.Account([pf.Position(str(r["标的"]), str(r["方向"]), float(r["名义 USDT"])) for _, r in rows.iterrows()],
-                             usdt, btc, mm, haircut, eth, haircut)
+
+            positions = holdings.rows_to_positions(edited.to_dict("records"), prices, auto, SUPPORTED)
+            cur = pf.Account(positions, usdt, btc, mm, haircut, eth, haircut)
             err = pf.validate_account(cur)
             if err:
                 st.warning(err)
             clicked = st.button("运行组合压力测试", type="primary", key="pf_run", width="stretch")
+
+        with h_right:
+            if not err:
+                pxs = get_crypto_prices()
+                coll = [(n, v, c) for n, v, c in (
+                    ("USDT", cur.usdt, ui.TEXT),
+                    ("BTC", cur.btc * pxs.get("BTC", 0) * cur.btc_haircut, ui.ORANGE),
+                    ("ETH", cur.eth * pxs.get("ETH", 0) * cur.eth_haircut, "#7fb0e0"),
+                    ("现货", pf.spot_value(cur), "#7fd67a")) if v > 0]
+                shades = ["#ece7dc", "#b9b2a2", "#8a8474", "#5f5a4e"]     # 多头用同色系不同深浅, 条形图才分得出来
+                items, k = [], 0
+                for p in cur.positions:
+                    if p.kind == "spot":
+                        c = "#7fb0e0"
+                    elif p.side == "short":
+                        c = ui.ORANGE
+                    else:
+                        c = shades[k % len(shades)]; k += 1
+                    items.append((p.symbol, p.notional, c))
+                equity = pf.equity0(cur, pxs.get("BTC", 0), pxs.get("ETH", 0))
+                gross = pf.gross_notional(cur)
+                html(ui.account_overview(items, coll, (gross / equity) if equity > 0 else None,
+                                         equity, pf.unrealized_pnl(cur), gross))
 
     # ?demo=1: 打开页面就自动跑一次示例组合 (给评委 / 录屏用); 只在本会话还没有报告时触发
     demo_autorun = st.query_params.get("demo") == "1" and "pf_report" not in st.session_state
@@ -246,6 +298,7 @@ with tab_pf:
                                 % (rep.daily_dates[0], rep.daily_dates[-1], len(rep.daily_dates))))
             html(ui.seismograph(rep.daily_dates, rep.daily_loss, rep.liq_loss))
 
+    c2, c3 = st.columns([5, 3], gap="medium")
     with c2:
         with st.container(key="panel_02"):
             html(ui.panel_title("02", "强平距离尺", "每个情景用掉多少"))

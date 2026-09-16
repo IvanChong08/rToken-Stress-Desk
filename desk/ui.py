@@ -32,8 +32,16 @@ div[class*="st-key-panel"]::after { content: ""; position: absolute; bottom: -1p
 .stButton button[kind="primary"], [data-testid^="stBaseButton-primary"] { background: #f08a24 !important; color: #121210 !important; border: none !important; font-weight: 700 !important; letter-spacing: 0.1em; clip-path: polygon(0 0, 100% 0, 100% 70%, 96% 100%, 0 100%); }
 [data-testid="stLinkButton"] a { border-radius: 0 !important; border: 1px solid #f08a24 !important; color: #f08a24 !important; background: transparent !important; }
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div { border-radius: 0 !important; background: #121210 !important; }
-[data-baseweb="tab-list"] { gap: 0; border: 1px solid #2e2d28; width: fit-content; }
-[data-baseweb="tab"] { padding: 6px 22px !important; }
+/* 标签栏方案 2: 标签紧贴顶栏下沿, 做成同一条栏的一部分 */
+[data-baseweb="tab-list"] { gap: 0; border: 1px solid #2e2d28; width: fit-content; margin-top: -30px; }
+[data-baseweb="tab"] { padding: 0 34px !important; height: 46px; }
+[data-baseweb="tab"] p { font-size: 16px !important; letter-spacing: 0.06em; }
+/* 输入框变主角; 示例按钮缩成小 chip */
+div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 34px; font-size: 15px; }
+div[class*="st-key-pf_ex_"] button, div[class*="st-key-pf_fu_"] button, div[class*="st-key-tr_ex_"] button {
+  min-height: 30px !important; padding: 2px 10px !important; }
+div[class*="st-key-pf_ex_"] button p, div[class*="st-key-pf_fu_"] button p, div[class*="st-key-tr_ex_"] button p {
+  font-size: 12.5px !important; }
 [data-baseweb="tab"][aria-selected="true"] { background: #f08a24; }
 [data-baseweb="tab"][aria-selected="true"] p { color: #121210 !important; font-weight: 700; }
 [data-baseweb="tab-highlight"], [data-baseweb="tab-border"] { display: none; }
@@ -262,6 +270,40 @@ def bullets(md: str, overall: float | None = None) -> str:
                  '<div style="font-size:14px;line-height:1.75;color:%s;">%s</div></div>'
                  % (LINE, tone, BG, esc(title), SOFT, _highlight(body)))
     return '<div style="border-top:2px solid %s;margin:6px 0 4px;">%s</div>' % (LINE, rows)
+
+
+def account_overview(items: list[tuple[str, float, str]], collateral: list[tuple[str, float, str]],
+                     eff_lev: float | None, equity: float, pnl: float, gross: float) -> str:
+    """持仓面板右侧的「账户全貌」: 仓位构成 / 保证金构成 / 有效杠杆 / 未实现盈亏。"""
+    def bar(parts):
+        total = sum(v for _, v, _ in parts) or 1.0
+        segs = "".join('<div style="width:%.2f%%;background:%s;"></div>' % (100 * v / total, c) for _, v, c in parts)
+        legend = " · ".join("%s %.0f%%" % (esc(n), 100 * v / total) for n, v, _ in parts)
+        return ('<div style="display:flex;height:20px;margin-top:6px;">%s</div>'
+                '<div class="m" style="font-size:11px;color:%s;margin-top:5px;line-height:1.7;">%s</div>' % (segs, MUTED, legend))
+
+    lev_html = ""
+    if eff_lev is not None:
+        lev_html = ('<div><div style="font-size:11px;color:%s;">有效杠杆</div>'
+                    '<div class="m" style="font-size:28px;font-weight:700;line-height:1.1;">%.2f×</div>'
+                    '<div style="height:8px;background:%s;margin-top:6px;position:relative;">'
+                    '<div style="width:%.0f%%;height:8px;background:%s;"></div>'
+                    '<div style="position:absolute;left:50%%;top:-3px;height:14px;border-left:1px dashed %s;"></div></div>'
+                    '<div style="font-size:11px;color:%s;margin-top:4px;">名义 ÷ 权益; 虚线 = 5 倍</div></div>'
+                    % (MUTED, eff_lev, LINE2, min(100.0, 100 * eff_lev / 10), ORANGE, STENCIL, MUTED))
+    pc = GREEN if pnl > 0 else (RED if pnl < 0 else MUTED)
+    pnl_txt = "%s%s USDT" % ("+" if pnl > 0 else ("−" if pnl < 0 else ""), format(round(abs(pnl)), ","))
+    return ('<div style="display:flex;flex-direction:column;gap:16px;">'
+            '<div style="font-size:13px;font-weight:700;letter-spacing:0.06em;color:%s;">账户全貌</div>'
+            '<div><div style="font-size:11px;color:%s;">仓位构成 (名义 %s)</div>%s</div>'
+            '<div><div style="font-size:11px;color:%s;">保证金构成 (权益 %s)</div>%s</div>%s'
+            '<div style="border-top:1px dashed #3a3831;padding-top:12px;">'
+            '<div style="font-size:11px;color:%s;">未实现盈亏</div>'
+            '<div class="m" style="font-size:22px;font-weight:700;color:%s;">%s</div>'
+            '<div style="font-size:11px;color:%s;">填了买入价的仓位才算; 当前价来自 Yahoo</div></div></div>'
+            % (SOFT, MUTED, format(round(gross), ","), bar(items) if items else "",
+               MUTED, format(round(equity), ","), bar(collateral) if collateral else "", lev_html,
+               MUTED, pc, pnl_txt, MUTED))
 
 
 def metric_card(m: dict) -> str:

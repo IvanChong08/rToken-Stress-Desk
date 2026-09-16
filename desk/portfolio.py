@@ -40,13 +40,32 @@ BTC_YAHOO, ETH_YAHOO = "BTC-USD", "ETH-USD"
 
 @dataclass
 class Position:
+    """
+    一笔持仓。notional 永远是【按当前价算的名义价值】。
+
+    kind = "leverage" 杠杆仓: 占维持保证金, 会被强平
+    kind = "spot"     现货:   市值计入权益, 不占维持保证金, 自己不会被强平 (但照样会亏)
+    entry / price 可选; 两个都有时能算出这笔的未实现盈亏, 并计入开仓权益
+    (不填就退回旧假设: 当作刚开仓, 浮盈浮亏为 0)。
+    """
     symbol: str          # 正股代码 (对应 R<symbol>USDT)
     side: str            # long | short
-    notional: float      # 名义价值 USDT (> 0)
+    notional: float      # 名义价值 USDT (> 0), 按当前价
+    kind: str = "leverage"          # leverage | spot
+    entry: float | None = None      # 买入价
+    price: float | None = None      # 当前价 (取数时填, 用于算未实现盈亏)
+    qty: float | None = None        # 数量 (界面用 买价 x 数量 推名义价值时保留)
 
     @property
     def sign(self) -> int:
         return 1 if self.side == "long" else -1
+
+    @property
+    def pnl(self) -> float:
+        """未实现盈亏 (USDT)。缺买入价或当前价时按 0 处理。"""
+        if not self.entry or not self.price or self.entry <= 0:
+            return 0.0
+        return self.sign * self.notional * (1 - self.entry / self.price)
 
 
 @dataclass
@@ -78,6 +97,10 @@ def validate_account(a: Account) -> str | None:
             return "不支持的标的: %r (目前支持 %s)" % (p.symbol, ", ".join(sorted(SUPPORTED)))
         if p.side not in ("long", "short"):
             return "%s 的方向必须是 long 或 short" % p.symbol
+        if p.kind not in ("leverage", "spot"):
+            return "%s 的类型必须是 leverage 或 spot" % p.symbol
+        if p.kind == "spot" and p.side == "short":
+            return "%s: 现货不能做空 (要做空请用杠杆仓)" % p.symbol
         if not p.notional > 0:
             return "%s 的名义价值必须大于 0" % p.symbol
         if (p.symbol, p.side) in seen:
@@ -85,8 +108,8 @@ def validate_account(a: Account) -> str | None:
         seen.add((p.symbol, p.side))
     if a.usdt < 0 or a.btc < 0 or a.eth < 0:
         return "抵押品数量不能为负"
-    if a.usdt == 0 and a.btc == 0 and a.eth == 0:
-        return "没有抵押品 (USDT、BTC 或 ETH)"
+    if a.usdt == 0 and a.btc == 0 and a.eth == 0 and spot_value(a) == 0:
+        return "没有抵押品 (USDT、BTC 或 ETH), 也没有现货"
     if not 0 < a.maint_margin < 0.5:
         return "维持保证金率需在 0-50% 之间"
     if not 0 < a.btc_haircut <= 1 or not 0 < a.eth_haircut <= 1:
@@ -225,12 +248,25 @@ class ShockResult:
         return asdict(self)
 
 
+def spot_value(a: Account) -> float:
+    """现货市值: 本身就是账户资产的一部分 (不要再把买现货花掉的 USDT 重复算进保证金)。"""
+    return sum(p.notional for p in a.positions if p.kind == "spot")
+
+
+def unrealized_pnl(a: Account) -> float:
+    """所有仓位的未实现盈亏合计 (只有填了买入价和当前价的仓位才算)。"""
+    return sum(p.pnl for p in a.positions if p.kind != "spot")
+
+
 def equity0(a: Account, btc_price: float, eth_price: float = 0.0) -> float:
-    return a.usdt + a.btc * btc_price * a.btc_haircut + a.eth * eth_price * a.eth_haircut
+    """开仓时账户权益 = 抵押品 (折算后) + 现货市值 + 杠杆仓的未实现盈亏。"""
+    return (a.usdt + a.btc * btc_price * a.btc_haircut + a.eth * eth_price * a.eth_haircut
+            + spot_value(a) + unrealized_pnl(a))
 
 
 def maint0(a: Account) -> float:
-    return a.maint_margin * sum(p.notional for p in a.positions)
+    """维持保证金只看杠杆仓; 现货不占维持保证金。"""
+    return a.maint_margin * sum(p.notional for p in a.positions if p.kind != "spot")
 
 
 def gross_notional(a: Account) -> float:
@@ -251,7 +287,8 @@ def shock(a: Account, btc_price: float, moves: dict[str, float], eth_price: floa
     for p in a.positions:
         r = moves.get(p.symbol, 0.0)
         pos_pnl["%s %s" % (p.symbol, p.side)] = p.sign * p.notional * r
-        maint += a.maint_margin * p.notional * (1 + r)
+        if p.kind != "spot":                     # 现货不占维持保证金
+            maint += a.maint_margin * p.notional * (1 + r)
     coll = (a.btc * btc_price * a.btc_haircut * moves.get(BTC, 0.0)
             + a.eth * eth_price * a.eth_haircut * moves.get(ETH, 0.0))
     e = e0 + sum(pos_pnl.values()) + coll
@@ -300,7 +337,8 @@ def replay(a: Account, panel: Panel, mode: str = "extreme") -> pd.DataFrame:
         pp = p.sign * p.notional * r
         worst_pos["%s %s" % (p.symbol, p.side)] = pp
         pnl += pp
-        maint += a.maint_margin * p.notional * (1 + r)
+        if p.kind != "spot":                     # 现货不占维持保证金
+            maint += a.maint_margin * p.notional * (1 + r)
     coll = _collateral_series(a, panel, frame)
     eq = e0 + pnl + coll
     buf = e0 - m0
@@ -332,7 +370,7 @@ def multi_day_worst(a: Account, panel: Panel, horizon: int = 5) -> pd.DataFrame:
     for j in range(1, horizon + 1):
         rel = lv.shift(-j) / lv - 1
         pnl = sum(p.sign * p.notional * rel[p.symbol] for p in a.positions)
-        maint = sum(a.maint_margin * p.notional * (1 + rel[p.symbol]) for p in a.positions)
+        maint = sum(a.maint_margin * p.notional * (1 + rel[p.symbol]) for p in a.positions if p.kind != "spot")
         eq = e0 + pnl + _collateral_series(a, panel, rel)
         rows.append(pd.DataFrame({"start": [str(d) for d in lv.index], "days": j, "equity": eq.values,
                                   "maint": maint.values, "btc_move": rel[BTC].values}))

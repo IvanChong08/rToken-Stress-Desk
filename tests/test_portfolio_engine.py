@@ -150,6 +150,30 @@ check("没有 ETH 的组合结果不变 (旧面板)", pf.replay(A, P, "extreme")
 check("没有 ETH 的组合结果不变 (新面板)", pf.replay(A, PE, "extreme").loc[0, "equity"], 898)
 check("account_from_dict 往返", pf.account_from_dict(AE.to_dict()) == AE, True)
 
+# ---- 现货 + 买入价 (2026-09-16 加入) ----
+# NVDA 杠杆多 3000, 买价 90 现价 100 -> 浮盈 3000x(1-90/100) = +300
+# MSTR 现货多 2000 (市值计入权益, 不占维持保证金)
+# TSLA 杠杆空 1000, 买价 60 现价 50 -> 浮盈 -1x1000x(1-60/50) = +200
+AS = pf.Account([pf.Position("NVDA", "long", 3000, entry=90, price=100),
+                 pf.Position("MSTR", "long", 2000, kind="spot", entry=250, price=200),
+                 pf.Position("TSLA", "short", 1000, entry=60, price=50)],
+                usdt=1000, btc=0.01, maint_margin=0.01, btc_haircut=0.9)
+check("现货市值", pf.spot_value(AS), 2000)
+check("未实现盈亏 (不含现货)", pf.unrealized_pnl(AS), 500)
+# 权益 = 1000 + 810 (BTC) + 2000 (现货) + 500 (浮盈) = 4310
+check("权益含现货与浮盈", pf.equity0(AS, 90000), 4310)
+check("维持保证金不含现货", pf.maint0(AS), 40)          # 0.01 x (3000 + 1000)
+# 变动同前: 仓位 -750, 抵押品 810x-0.2 = -162 -> 3398; 维持 = 0.01x(2700 + 1050) = 37.5
+r = pf.shock(AS, 90000, mv)
+check("现货组合 shock equity", r.equity, 3398)
+check("现货组合 shock maint", r.maint, 37.5)
+check("现货组合 buffer_used", r.buffer_used, 912 / 4270, 1e-6)
+check("面板重演一致", pf.replay(AS, P, "extreme").loc[0, "equity"], 3398)
+check("只有现货也算有资产", pf.validate_account(pf.Account([pf.Position("NVDA", "long", 1000, kind="spot")])), None)
+check("现货不能做空", pf.validate_account(pf.Account([pf.Position("NVDA", "short", 1000, kind="spot")], usdt=100)) is not None, True)
+check("没填买价就当浮盈为 0", pf.Position("NVDA", "long", 3000).pnl, 0.0)
+check("旧组合结果不变", pf.equity0(A, 90000), 1810)
+
 # ---- 3. 校验 ----
 check("validate ok", pf.validate_account(A), None)
 check("validate unsupported", pf.validate_account(pf.Account([pf.Position("DOGE", "long", 1)], usdt=1)) is not None, True)
