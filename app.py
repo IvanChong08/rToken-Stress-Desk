@@ -33,6 +33,15 @@ from desk.idea import SUPPORTED, TradeIdea, parse, validate  # noqa: E402
 from desk.provenance import CallLog, verify_log  # noqa: E402
 from desk.sources import mcp  # noqa: E402
 
+# Streamlit Community Cloud 的密钥放在 Secrets 里, 本项目其余代码统一读环境变量 -> 这里桥接一下。
+# 只搬运字符串值, 不打印、不写日志。
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str) and _k not in os.environ:
+            os.environ[_k] = _v
+except Exception:
+    pass
+
 LOG_PATH = os.path.join(ROOT, "data", "calls_app.jsonl")
 USED_SKILL_TOOLS = {"technical_analysis.atr"}   # 与 desk/card.py 里实际调用的 Skill 工具保持一致
 TRADE_EXAMPLES = ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "MSTR 5倍做多 过周末", "英伟达财报前 5x 做多"]
