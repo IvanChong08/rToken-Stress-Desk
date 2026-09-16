@@ -30,9 +30,10 @@ from desk import portfolio as pf  # noqa: E402
 from desk import portfolio_card as pcard  # noqa: E402
 from desk import portfolio_idea as pidea  # noqa: E402
 from desk import radar as radarmod  # noqa: E402
-from desk import idea as idea_mod  # noqa: E402
 from desk import universe  # noqa: E402
-from desk.idea import SUPPORTED, TradeIdea, parse, validate  # noqa: E402
+from desk.idea import TradeIdea, parse, validate  # noqa: E402
+
+SUPPORTED = universe.SUPPORTED
 from desk.provenance import CallLog, verify_log  # noqa: E402
 from desk.sources import mcp  # noqa: E402
 
@@ -221,7 +222,7 @@ with tab_pf:
 
     with st.container(key="panel_01"):
         html(ui.panel_title("01", "持仓", "%d 只 rToken 可选 (%d 只能加杠杆); 买入价留空 = 当作刚开仓"
-                            % (len(SUPPORTED), len(universe.LEVERAGE))))
+                            % (len(universe.SUPPORTED), len(universe.LEVERAGE))))
         h_left, h_right = st.columns([7, 3], gap="medium")
         with h_left:
             ver = st.session_state["pf_ver"]
@@ -414,7 +415,7 @@ with tab_trade:
     text = t_in.text_input("用一句话描述你的交易想法 (也可以追问, 例如「如果降到 2 倍呢」)", key="query")
     st.caption("单笔模式要用 rToken 的真实小时线算周末重锚, 本地只缓存了 %s 这 %d 只; "
                "其他标的请用「组合」模式 (用正股 5 年日线重演, 全部 %d 只都能测)。"
-               % ("、".join(sorted(idea_mod.TRADE_SUPPORTED)), len(idea_mod.TRADE_SUPPORTED), len(SUPPORTED)))
+               % ("、".join(sorted(universe.CACHED)), len(universe.CACHED), len(universe.SUPPORTED)))
 
     if t_btn.button("单笔压力测试", type="primary", width="stretch") and text.strip():
         log = get_log()
