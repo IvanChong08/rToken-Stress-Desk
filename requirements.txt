@@ -1,3 +1,5 @@
 requests>=2.31
 pandas>=2.1
-streamlit>=1.32
+# 钉死版本: Streamlit 新版把标签栏从 data-baseweb="tab" 换成了 data-testid="stTab",
+# 不钉的话云端装的版本和本地不一样, 本地测过的样式到云端可能整片失效。
+streamlit==1.58.0

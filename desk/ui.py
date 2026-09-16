@@ -32,19 +32,21 @@ div[class*="st-key-panel"]::after { content: ""; position: absolute; bottom: -1p
 .stButton button[kind="primary"], [data-testid^="stBaseButton-primary"] { background: #f08a24 !important; color: #121210 !important; border: none !important; font-weight: 700 !important; letter-spacing: 0.1em; clip-path: polygon(0 0, 100% 0, 100% 70%, 96% 100%, 0 100%); }
 [data-testid="stLinkButton"] a { border-radius: 0 !important; border: 1px solid #f08a24 !important; color: #f08a24 !important; background: transparent !important; }
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div { border-radius: 0 !important; background: #121210 !important; }
-/* 标签栏方案 2: 标签紧贴顶栏下沿, 做成同一条栏的一部分 */
-[data-baseweb="tab-list"] { gap: 0; border: 1px solid #2e2d28; width: fit-content; margin-top: -30px; }
-[data-baseweb="tab"] { padding: 0 34px !important; height: 46px; }
-[data-baseweb="tab"] p { font-size: 16px !important; letter-spacing: 0.06em; }
+/* 标签栏方案 2: 标签紧贴顶栏下沿, 做成同一条栏的一部分。
+   用 role= 选择器: 1.4x 的标签是 data-baseweb="tab", 新版换成了 data-testid="stTab" (react-aria),
+   只有 role 两边都在 —— 云端装的 Streamlit 比本地新, 按 baseweb 写的 CSS 在云端一条都不生效。 */
+[data-testid="stTabs"] [role="tablist"] { gap: 0 !important; border: 1px solid #2e2d28; width: fit-content !important; margin-top: -30px; }
+[data-testid="stTabs"] [role="tab"] { padding: 0 34px !important; height: 46px !important; min-width: 0 !important; flex: none !important; }
+[data-testid="stTabs"] [role="tab"] p { font-size: 16px !important; letter-spacing: 0.06em; }
 /* 输入框变主角; 示例按钮缩成小 chip */
 div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 34px; font-size: 15px; }
 div[class*="st-key-pf_ex_"] button, div[class*="st-key-pf_fu_"] button, div[class*="st-key-tr_ex_"] button {
   min-height: 30px !important; padding: 2px 10px !important; }
 div[class*="st-key-pf_ex_"] button p, div[class*="st-key-pf_fu_"] button p, div[class*="st-key-tr_ex_"] button p {
   font-size: 12.5px !important; }
-[data-baseweb="tab"][aria-selected="true"] { background: #f08a24; }
-[data-baseweb="tab"][aria-selected="true"] p { color: #121210 !important; font-weight: 700; }
-[data-baseweb="tab-highlight"], [data-baseweb="tab-border"] { display: none; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] { background: #f08a24 !important; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] p { color: #121210 !important; font-weight: 700; }
+[data-baseweb="tab-highlight"], [data-baseweb="tab-border"], .react-aria-SelectionIndicator { display: none !important; }
 [data-testid="stExpander"] details { border-radius: 0; border-color: #2e2d28; }
 @keyframes rsdblink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
 .rsd-blink { animation: rsdblink 1s ease-in-out infinite; }
