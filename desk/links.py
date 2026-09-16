@@ -33,20 +33,25 @@ def adjustment_steps(before: Account, after: Account, tol: float = 0.5) -> list[
     steps = []
     b = {(p.symbol, p.side): p.notional for p in before.positions}
     a = {(p.symbol, p.side): p.notional for p in after.positions}
+    kinds = {(p.symbol, p.side): p.kind for p in list(before.positions) + list(after.positions)}
     for key in sorted(set(b) | set(a)):
         x, y = b.get(key, 0.0), a.get(key, 0.0)
         if abs(y - x) < tol:
             continue
         sym, side = key
-        side_cn = "做多" if side == "long" else "做空"
+        spot = kinds.get(key) == "spot"
+        # 现货没有多空, 也不该把人往永续合约页面带 —— 那是他没持有的产品
+        side_cn = "现货" if spot else ("做多" if side == "long" else "做空")
+        less, more = ("卖出", "买入") if spot else ("减仓", "加仓")
         if y == 0:
-            text = "平掉 %s %s 全部 %s USDT" % (sym, side_cn, format(round(x), ","))
+            text = "%s %s 全部卖出 %s USDT" % (sym, side_cn, format(round(x), ",")) if spot else                    "平掉 %s %s 全部 %s USDT" % (sym, side_cn, format(round(x), ","))
         elif y < x:
-            text = "%s %s 减仓 %s USDT (%s → %s)" % (sym, side_cn, format(round(x - y), ","), format(round(x), ","), format(round(y), ","))
+            text = "%s %s %s %s USDT (%s → %s)" % (sym, side_cn, less, format(round(x - y), ","), format(round(x), ","), format(round(y), ","))
         else:
-            text = "%s %s 加仓 %s USDT (%s → %s)" % (sym, side_cn, format(round(y - x), ","), format(round(x), ","), format(round(y), ","))
+            text = "%s %s %s %s USDT (%s → %s)" % (sym, side_cn, more, format(round(y - x), ","), format(round(x), ","), format(round(y), ","))
         steps.append({"kind": "position", "symbol": sym, "side": side, "from": x, "to": y, "delta": y - x, "text": text,
-                      "spot_url": spot_url(sym), "futures_url": futures_url(sym), "note": NAME_NOTES.get(sym, "")})
+                      "spot_url": spot_url(sym), "futures_url": "" if spot else futures_url(sym),
+                      "note": NAME_NOTES.get(sym, "")})
     if abs(after.btc - before.btc) > 1e-9:
         steps.append({"kind": "collateral", "symbol": "BTC", "side": "", "from": before.btc, "to": after.btc,
                       "delta": after.btc - before.btc,
@@ -60,8 +65,11 @@ def adjustment_steps(before: Account, after: Account, tol: float = 0.5) -> list[
                                                                 "在 Bitget 买入或划入" if after.eth > before.eth else "在 Bitget 卖出换成 USDT"),
                       "spot_url": "%s/spot/ETHUSDT" % BITGET, "futures_url": "", "note": ""})
     if abs(after.usdt - before.usdt) >= tol:
+        # 全是现货的账户没有「保证金」, USDT 只是卖出后留在手上的钱
+        spot_only = all(p.kind == "spot" for p in list(before.positions) + list(after.positions))
+        label = "卖出后 USDT 余额" if spot_only else "保证金 USDT"
         steps.append({"kind": "collateral", "symbol": "USDT", "side": "", "from": before.usdt, "to": after.usdt,
                       "delta": after.usdt - before.usdt,
-                      "text": "保证金 USDT %s → %s" % (format(round(before.usdt), ","), format(round(after.usdt), ",")),
+                      "text": "%s %s → %s" % (label, format(round(before.usdt), ","), format(round(after.usdt), ",")),
                       "spot_url": "", "futures_url": "", "note": ""})
     return steps

@@ -172,8 +172,9 @@ def compare_line(before: float, after: float) -> str:
 RULER_SHORT = {"single_day": "单日", "multi_day": "连续5日", "presets": "预设", "weekend": "周末"}
 
 
-def ruler(items: list[dict]) -> str:
+def ruler(items: list[dict], end_label: str = "强平") -> str:
     """强平距离尺: 每个评分项用掉多少强平距离 (= 100 − 分数), 最后 10% 是警示胶带区。
+    end_label: 尺尾写什么 —— 全是现货的账户不会被强平, 尺尾是「本金亏光」。
     标签用短名 (09-16 截图发现长名在尺上互相重叠); 相邻标记距离 < 30% 时上下错开。"""
     placed, prev_p, prev_row = [], None, 1
     for it in sorted(items, key=lambda x: 100 - x["score"]):
@@ -196,8 +197,8 @@ def ruler(items: list[dict]) -> str:
             '<div class="rsd-tape-thin" style="position:absolute;left:90%%;right:0;top:70px;height:14px;"></div>'
             '<div style="position:absolute;left:0;right:0;top:86px;height:8px;background:repeating-linear-gradient(90deg,%s 0 1px,transparent 1px 10%%);"></div>'
             '<div class="m" style="position:absolute;left:0;top:98px;font-size:10px;color:%s;">开仓</div>'
-            '<div class="m" style="position:absolute;right:0;top:98px;font-size:10px;font-weight:700;color:%s;">强平</div></div>'
-            % (marks, LINE2, STENCIL, MUTED, ORANGE))
+            '<div class="m" style="position:absolute;right:0;top:98px;font-size:10px;font-weight:700;color:%s;">%s</div></div>'
+            % (marks, LINE2, STENCIL, MUTED, ORANGE, esc(end_label)))
 
 
 def evidence_line(evidence: list[dict]) -> str:

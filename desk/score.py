@@ -18,6 +18,8 @@ from .analysis.weekend_gap import confidence_tier
 
 SCORE_RULE = ("每项得分 = 100 × (1 − 情景亏损 ÷ 开仓时离强平的距离), 截断到 0–100, 情景中触及强平记 0 分; "
               "总分取最低的一项 (短板决定风险, 不取平均)。")
+SCORE_RULE_SPOT = ("全是现货, 不会被强平: 每项得分 = 100 × (1 − 情景亏损 ÷ 初始权益), 截断到 0–100; "
+                   "总分取最低的一项 (短板决定风险, 不取平均)。")
 
 
 @dataclass
@@ -72,6 +74,9 @@ def portfolio_scorecard(a: pf.Account, panel: pf.Panel, horizon: int = 5, today:
     e0, m0 = pf.equity0(a, panel.btc_price, panel.eth_price), pf.maint0(a)
     buf = e0 - m0
     items: list[ScoreItem] = []
+    # 全是现货时维持保证金为 0, 分母退化成初始权益 —— 分数照算, 但不能再说「强平距离」, 现货压根不会被强平
+    spot_only = bool(a.positions) and all(p.kind == "spot" for p in a.positions)
+    used = (lambda pct: "亏掉 %.1f%% 的本金" % pct) if spot_only else (lambda pct: "亏损用掉 %.1f%% 的强平距离" % pct)
 
     rep = pf.replay(a, panel, "extreme")
     worst = rep.iloc[0]
@@ -80,7 +85,7 @@ def portfolio_scorecard(a: pf.Account, panel: pf.Panel, horizon: int = 5, today:
         "single_day", "单日极端行情", from_buffer_used(float(worst.buffer_used), n_liq > 0),
         "5 年逐日重演, 各资产取当日最不利价格 (同时发生, 偏保守)",
         ("%d 个交易日里有 %d 天触及强平" % (len(rep), n_liq)) if n_liq else
-        "最差 %s · 亏损用掉 %.1f%% 的强平距离" % (worst.date, 100 * worst.buffer_used), n_liq > 0))
+        "最差 %s · %s" % (worst.date, used(100 * worst.buffer_used)), n_liq > 0))
 
     md = pf.multi_day_worst(a, panel, horizon)
     mw = md.iloc[0]
@@ -90,14 +95,14 @@ def portfolio_scorecard(a: pf.Account, panel: pf.Panel, horizon: int = 5, today:
         "multi_day", "连续 %d 日下跌" % horizon, from_buffer_used(md_bu, md_liq > 0),
         "5 年里每个起点持有 1–%d 个交易日, 收盘价口径, 不调仓" % horizon,
         ("%d 个起点触及强平" % md_liq) if md_liq else
-        "最差 %s 起持有 %d 天 · 亏损用掉 %.1f%% 的强平距离" % (mw.start, int(mw.days), 100 * md_bu), md_liq > 0))
+        "最差 %s 起持有 %d 天 · %s" % (mw.start, int(mw.days), used(100 * md_bu)), md_liq > 0))
 
     pres = [(p, pf.shock(a, panel.btc_price, pf.preset_moves(a, p), panel.eth_price)) for p in pf.PRESETS]
     pw, rw = min(pres, key=lambda x: from_buffer_used(x[1].buffer_used, x[1].liquidated))
     items.append(ScoreItem(
         "presets", "预设双重打击情景", from_buffer_used(rw.buffer_used, rw.liquidated),
         "%d 个假设情景中最差的一个 (情景参数是假设, 不是预测)" % len(pf.PRESETS),
-        "最差「%s」· %s" % (pw["name"], "触及强平" if rw.liquidated else "亏损用掉 %.1f%% 的强平距离" % (100 * rw.buffer_used)),
+        "最差「%s」· %s" % (pw["name"], "触及强平" if rw.liquidated else used(100 * rw.buffer_used)),
         rw.liquidated))
 
     ev = [Evidence("历史样本", "ok" if confidence_tier(len(rep)) == "stats" else "warn",
@@ -114,7 +119,10 @@ def portfolio_scorecard(a: pf.Account, panel: pf.Panel, horizon: int = 5, today:
     ev.append(Evidence("用户假设参数", "warn", "维持保证金率 %.1f%%、%s —— 不是 Bitget 官方数值"
                        % (100 * a.maint_margin, haircuts)))
     ev.append(Evidence("模型简化", "warn", "未计手续费、资金费、滑点、分档维持保证金; 股票与加密的日期对齐是近似"))
-    return _overall(items, ev)
+    card = _overall(items, ev)
+    if spot_only:
+        card.rule = SCORE_RULE_SPOT
+    return card
 
 
 # ---------------------------------------------------------------- 单笔

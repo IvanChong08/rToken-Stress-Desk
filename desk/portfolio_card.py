@@ -75,6 +75,7 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
     def xdisp(x):
         return "不利变动 %.1f%%" % (100 * x) if x is not None and x < 1 else "价格归零也不强平"
 
+    spot_only = bool(a.positions) and all(p.kind == "spot" for p in a.positions)
     items = {i.key: i for i in sc.items}
     facts = [
         Fact("score", "安全总分", sc.overall, "%.0f 分 (%s) · 短板: %s" % (sc.overall, score.grade(sc.overall), sc.weakest_label),
@@ -133,15 +134,19 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
         sym, side = drag[0][0].split(" ")
         c = suggest.halve_position(a, sym, side)
         scc = suggest.overall(c, panel, horizon)
-        txt = "把最拖累的 %s %s 砍半 (最差 10 天里 %d 天是它亏最多), 总分 %.0f → %.0f" % (
-            sym, side, drag[0][1], sc.overall, scc)
+        kind = next((p.kind for p in a.positions if p.symbol == sym and p.side == side), "leverage")
+        side_cn = "现货" if kind == "spot" else ("做多" if side == "long" else "做空")
+        verb = "卖一半" if kind == "spot" else "砍半"
+        txt = "把最拖累的 %s %s %s (最差 10 天里 %d 天是它亏最多), 总分 %.0f → %.0f" % (
+            sym, side_cn, verb, drag[0][1], sc.overall, scc)
         suggestions.append({"key": "halve", "text": txt, "score": scc, "account": c.to_dict(), "score_before": sc.overall,
-                            "title": "%s %s砍半" % (sym, "做多" if side == "long" else "做空"),
+                            "title": "%s %s%s" % (sym, side_cn, verb),
                             "detail": "最差 10 天里 %d 天是它亏最多" % drag[0][1]})
         facts.append(Fact("sug_halve", "调整方案: 砍半最拖累的仓位", scc, txt, allsrc))
 
+    used_col = "亏掉本金 %" if spot_only else "强平距离用掉 %"      # 现货没有强平距离, 列名照直说
     worst_days = [{"日期": r.date, "仓位盈亏": round(r.positions_pnl), "%s 抵押品盈亏" % cn: round(r.collateral_pnl),
-                   "账户亏损 %": round(100 * r.loss_pct, 1), "强平距离用掉 %": round(100 * r.buffer_used, 1),
+                   "账户亏损 %": round(100 * r.loss_pct, 1), used_col: round(100 * r.buffer_used, 1),
                    "BTC 当日最低": "%+.1f%%" % (100 * r.btc_move),
                    **({"ETH 当日最低": "%+.1f%%" % (100 * r.eth_move)} if a.eth > 0 else {}),
                    "最拖累": r.worst_position, "强平": "是" if r.liquidated else ""}
@@ -153,7 +158,7 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
     for p in pf.PRESETS:
         r = pf.shock(a, panel.btc_price, pf.preset_moves(a, p), panel.eth_price)
         presets.append({"假设情景": p["name"], "账户亏损 %": round(100 * r.loss_pct, 1),
-                        "强平距离用掉 %": round(100 * r.buffer_used, 1), "强平": "是" if r.liquidated else "",
+                        used_col: round(100 * r.buffer_used, 1), "强平": "是" if r.liquidated else "",
                         "得分": round(score.from_buffer_used(r.buffer_used, r.liquidated))})
 
     warnings = [
@@ -173,7 +178,7 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
 
     chrono = rep.sort_values("date")
     report = PortfolioReport(a.to_dict(), sc.to_dict(), facts, worst_days, multi_days, presets, suggestions,
-                             _template(facts, sc), "template", warnings,
+                             _template(facts, sc, spot_only, a.btc > 0 or a.eth > 0), "template", warnings,
                              [p.to_dict() for p in panel.provenance.values()],
                              list(chrono.date), [float(x) for x in chrono.loss_pct], (e0 - m0) / e0)
     if use_llm:
@@ -202,13 +207,17 @@ def narrate(report: PortfolioReport, horizon: int = 5, log: CallLog | None = Non
     return report
 
 
-def _template(facts: list[Fact], sc: score.Scorecard) -> str:
+def _template(facts: list[Fact], sc: score.Scorecard, spot_only: bool = False, crypto_coll: bool = True) -> str:
     """分点结论 (Markdown 列表): 很多人不读整段文字, 每点一个结论。"""
     f = {x.key: x.display for x in facts}
     lines = [
         "- **安全总分**: %s" % f["score"],
-        "- **最差单日**: %s, 其中抵押品缩水 %s" % (f["sd_loss"], f["sd_coll"]),
+        # 没有加密抵押品时「抵押品缩水 0」是废话, 不占一行
+        ("- **最差单日**: %s, 其中抵押品缩水 %s" % (f["sd_loss"], f["sd_coll"])) if crypto_coll else
+        ("- **最差单日**: %s" % f["sd_loss"]),
         "- **连续持有最差**: %s" % f["md_loss"],
+        # 全是现货时「离强平多远」没有意义 (没有强平), 说成强平距离会误导
+        "- **不会被强平**: 全是现货、没有杠杆, 跌到底也不会被平仓; 但上面的亏损照样发生" if spot_only else
         "- **同步下跌多少会强平**: 加密抵押品同跌时%s; 不动时%s" % (f["x_follow"], f["x_flat"]),
     ]
     sug = [f[k] for k in ("sug_scale", "sug_swap", "sug_halve") if k in f]

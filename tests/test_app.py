@@ -71,6 +71,24 @@ click("解析 / 修改")
 at.run()
 report("组合: 新组合", t)
 
+# 全现货、零保证金 (表格里可以直接填出来): 曾经在 multi_day_worst 里崩掉, 且不能说「强平距离」
+t = time.time()
+from desk import portfolio as pf                                     # noqa: E402
+at.session_state["pf_account"] = pf.Account(
+    [pf.Position("NVDA", "long", 3795.0, kind="spot", qty=17.0, price=223.2),
+     pf.Position("AAPL", "long", 3795.0, kind="spot", qty=11.0, price=345.0)],
+    usdt=0.0, btc=0.0, maint_margin=0.01)
+at.session_state["pf_ver"] = 99
+at.session_state["pf_report"] = None
+at.run()
+click("运行组合压力测试")
+at.run()
+report("组合: 全现货零保证金", t)
+page = " ".join(md_all())
+for name, ok in [("写明不会被强平", "不会被强平" in page), ("不提强平距离", "强平距离" not in page)]:
+    problems += not ok
+    print("  %s: %s" % (name, "OK" if ok else "FAIL"))
+
 for q in ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "如果降到 2 倍呢", "我想买点狗狗币"]:
     t = time.time()
     at.text_input(key="query").input(q)

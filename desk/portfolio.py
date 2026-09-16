@@ -369,11 +369,17 @@ def multi_day_worst(a: Account, panel: Panel, horizon: int = 5) -> pd.DataFrame:
     rows = []
     for j in range(1, horizon + 1):
         rel = lv.shift(-j) / lv - 1
-        pnl = sum(p.sign * p.notional * rel[p.symbol] for p in a.positions)
-        maint = sum(a.maint_margin * p.notional * (1 + rel[p.symbol]) for p in a.positions if p.kind != "spot")
+        # 用 Series 起头, 不能用 sum(generator): 全是现货时那一路求和会退化成 int 0, 后面 .values 就炸了
+        pnl = pd.Series(0.0, index=lv.index)
+        maint = pd.Series(0.0, index=lv.index)
+        for p in a.positions:
+            pnl = pnl + p.sign * p.notional * rel[p.symbol]
+            if p.kind != "spot":                 # 现货不占维持保证金
+                maint = maint + a.maint_margin * p.notional * (1 + rel[p.symbol])
         eq = e0 + pnl + _collateral_series(a, panel, rel)
         rows.append(pd.DataFrame({"start": [str(d) for d in lv.index], "days": j, "equity": eq.values,
-                                  "maint": maint.values, "btc_move": rel[BTC].values}))
+                                  "maint": maint.values,
+                                  "btc_move": rel[BTC].values if BTC in rel.columns else float("nan")}))
     df = pd.concat(rows).dropna()
     df["loss_pct"] = (e0 - df["equity"]) / e0
     df["liquidated"] = df["equity"] <= df["maint"]

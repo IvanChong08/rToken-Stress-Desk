@@ -301,7 +301,11 @@ with tab_pf:
     c2, c3 = st.columns([5, 3], gap="medium")
     with c2:
         with st.container(key="panel_02"):
-            html(ui.panel_title("02", "强平距离尺", "每个情景用掉多少"))
+            # 全是现货的账户不会被强平, 尺子量的是亏掉多少本金
+            pf_spot_only = rep is not None and bool(rep.account["positions"]) and all(
+                p.get("kind") == "spot" for p in rep.account["positions"])
+            html(ui.panel_title("02", "亏损尺" if pf_spot_only else "强平距离尺",
+                                "每个情景亏掉多少本金" if pf_spot_only else "每个情景用掉多少"))
             if rep is None:
                 st.caption("运行后显示安全总分。")
             else:
@@ -309,7 +313,7 @@ with tab_pf:
                 html(ui.score_block(sc["overall"], sc["weakest_label"], score.grade(sc["overall"])))
                 if st.session_state.get("pf_prev_score") is not None:
                     html(ui.compare_line(st.session_state["pf_prev_score"], sc["overall"]))
-                html(ui.ruler(sc["items"]))
+                html(ui.ruler(sc["items"], "本金亏光" if pf_spot_only else "强平"))
                 html(ui.evidence_line(sc["evidence"]))
                 st.write("")
                 html(ui.bullets(rep.narrative, sc["overall"]))
