@@ -252,28 +252,37 @@ def _highlight(text: str) -> str:
 
 
 def bullets(md: str, overall: float | None = None) -> str:
-    """把 Markdown 分点结论 (模板或大模型写的) 渲染成: 彩色标签 + 数字高亮。解析不了的行照常显示。"""
-    rows = ""
+    """
+    把 Markdown 分点结论 (模板或大模型写的) 渲染成: 彩色标签 + 数字高亮。解析不了的行照常显示。
+    子条目 (缩进行) 必须画进它所属那条的正文格里 —— 早先是单独一行、左边距写死 106px,
+    结果「可以考虑」那行正文空着, 两条建议悬在它和「提醒」之间, 看起来像掉到下一条去了 (09-16 Ivan 截图)。
+    """
+    blocks: list[dict] = []
     for raw in md.splitlines():
         if not raw.strip():
             continue
-        sub = raw.startswith(("  ", "\t"))
         line = re.sub(r"^[-*•]\s+", "", raw.strip())
+        if raw.startswith(("  ", "\t", "    ")) and blocks:
+            blocks[-1]["subs"].append(line.replace("**", ""))
+            continue
         m = re.match(r"\*\*(.+?)\*\*\s*[:：]?\s*(.*)", line)
         title, body = (m.group(1).strip(), m.group(2)) if m else ("", line)
-        body = body.replace("**", "")
-        if sub:
-            rows += ('<div style="display:flex;gap:10px;padding:4px 0 4px 106px;">'
-                     '<svg width="8" height="8" style="flex:0 0 auto;margin-top:9px;"><rect width="8" height="8" fill="%s"></rect></svg>'
-                     '<div style="font-size:14px;line-height:1.7;color:%s;">%s</div></div>' % (GREEN, SOFT, _highlight(line.replace("**", ""))))
-            continue
-        if not title:
-            title = "提醒" if re.search(r"历史|最终|决定", body) else "要点"
+        blocks.append({"title": title, "body": body.replace("**", ""), "subs": []})
+
+    rows = ""
+    for b in blocks:
+        title = b["title"] or ("提醒" if re.search(r"历史|最终|决定", b["body"]) else "要点")
         tone = _tone(title, overall)
+        body = '<div style="font-size:14px;line-height:1.75;color:%s;">%s</div>' % (SOFT, _highlight(b["body"])) \
+            if b["body"].strip() else ""
+        for sub in b["subs"]:
+            body += ('<div style="display:flex;gap:10px;padding:3px 0;">'
+                     '<svg width="8" height="8" style="flex:0 0 auto;margin-top:8px;"><rect width="8" height="8" fill="%s"></rect></svg>'
+                     '<div style="font-size:14px;line-height:1.7;color:%s;">%s</div></div>' % (GREEN, SOFT, _highlight(sub)))
         rows += ('<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px dashed %s;">'
                  '<span style="flex:0 0 auto;min-width:94px;text-align:center;background:%s;color:%s;font-weight:700;font-size:12px;padding:3px 8px;letter-spacing:0.04em;">%s</span>'
-                 '<div style="font-size:14px;line-height:1.75;color:%s;">%s</div></div>'
-                 % (LINE, tone, BG, esc(title), SOFT, _highlight(body)))
+                 '<div style="flex:1 1 auto;min-width:0;">%s</div></div>'
+                 % (LINE, tone, BG, esc(title), body))
     return '<div style="border-top:2px solid %s;margin:6px 0 4px;">%s</div>' % (LINE, rows)
 
 
