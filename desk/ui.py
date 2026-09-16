@@ -34,8 +34,10 @@ div[class*="st-key-panel"]::after { content: ""; position: absolute; bottom: -1p
 [data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div { border-radius: 0 !important; background: #121210 !important; }
 /* 标签栏方案 2: 标签紧贴顶栏下沿, 做成同一条栏的一部分。
    用 role= 选择器: 1.4x 的标签是 data-baseweb="tab", 新版换成了 data-testid="stTab" (react-aria),
-   只有 role 两边都在 —— 云端装的 Streamlit 比本地新, 按 baseweb 写的 CSS 在云端一条都不生效。 */
-[data-testid="stTabs"] [role="tablist"] { gap: 0 !important; border: 1px solid #2e2d28; width: fit-content !important; margin-top: -30px; }
+   只有 role 两边都在 —— 云端装的 Streamlit 比本地新, 按 baseweb 写的 CSS 在云端一条都不生效。
+   margin-top 只抵消 1px 边框: 顶栏会随状态灯个数折行 (本地 110px / 云端 60px),
+   按某一边的高度调负 margin, 到另一边就会盖住标题。 */
+[data-testid="stTabs"] [role="tablist"] { gap: 0 !important; border: 1px solid #2e2d28; width: fit-content !important; margin-top: -1px; }
 [data-testid="stTabs"] [role="tab"] { padding: 0 34px !important; height: 46px !important; min-width: 0 !important; flex: none !important; }
 [data-testid="stTabs"] [role="tab"] p { font-size: 16px !important; letter-spacing: 0.06em; }
 /* 输入框变主角; 示例按钮缩成小 chip */
