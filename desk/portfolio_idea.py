@@ -282,11 +282,12 @@ def edit(text: str, account: Account, btc_price: float, eth_price: float = 0.0) 
         return None, "句子较复杂, 交给大模型理解"
     syms = [s for _, s in _symbols_in(text)]
     # 一句话里有多种操作 (「平掉 COIN 再把 MSTR 砍半」), 规则会把同一个操作套到所有标的上 (09-16 实测出错) -> 交给大模型
-    kinds = [r"砍半|减半|一半", r"去掉|平掉|删除|不要|清掉", r"改成|改为|加到|减到|调到|变成", r"换成|换为|换到|替换|转成|转为"]
-    if sum(bool(re.search(k, text)) for k in kinds) >= 2 or (len(syms) >= 2 and re.search(r"再|然后|并且|同时|另外", text)):
+    kinds = [r"砍半|减半|一半|halve|cut .*half", r"去掉|平掉|删除|不要|清掉|close|remove|drop|exit",
+             r"改成|改为|加到|减到|调到|变成|set .*to|change .*to", r"换成|换为|换到|替换|转成|转为|swap|switch|replace|rotate"]
+    if sum(bool(re.search(k, low)) for k in kinds) >= 2             or (len(syms) >= 2 and re.search(r"再|然后|并且|同时|另外|then|and then|also", low)):
         return None, "一句话里有多个操作, 交给大模型理解"
     # 「把 A 换成 B」: 名义价值和方向不变; B 已有同方向仓位就合并
-    if len(syms) >= 2 and re.search(r"换成|换为|换到|替换|转成|转为|改成|改为", text):
+    if len(syms) >= 2 and re.search(r"换成|换为|换到|替换|转成|转为|改成|改为|swap|switch|replace|rotate|into", low):
         src_sym, dst_sym = syms[0], syms[1]
         for p in [q for q in a.positions if q.symbol == src_sym]:
             same = next((q for q in a.positions if q.symbol == dst_sym and q.side == p.side), None)
@@ -300,7 +301,9 @@ def edit(text: str, account: Account, btc_price: float, eth_price: float = 0.0) 
                 p.symbol = dst_sym
         if notes:
             syms = []
-    if re.search(r"(btc|比特币|eth|以太).*(换|转).*(usdt|u\b)", low):
+    # 语序两边都要认: 中文「BTC 全部换成 USDT」/ 英文「swap all BTC to USDT」(动词在前)
+    if (re.search(r"btc|比特币|eth|以太", low) and re.search(r"usdt|cash|stable", low)
+            and re.search(r"换|转|swap|convert|sell|move", low)):
         for name, attr, px, pat in (("BTC", "btc", btc_price, r"btc|比特币"), ("ETH", "eth", eth_price, r"eth|以太")):
             qty = getattr(a, attr)
             if re.search(pat, low) and qty > 0 and px > 0:     # 没持有就不算修改 (交给后面说明)
@@ -311,23 +314,24 @@ def edit(text: str, account: Account, btc_price: float, eth_price: float = 0.0) 
         targets = [p for p in a.positions if p.symbol == sym]
         if not targets:
             continue
-        if re.search(r"砍半|减半|一半", text):
+        if re.search(r"砍半|减半|一半|halve|half", low):
             for p in targets:
                 notes.append("%s %s %.0f → %.0f" % (sym, p.side, p.notional, p.notional / 2))
                 p.notional /= 2
-        elif re.search(r"去掉|平掉|删除|不要|清掉|remove|close", low):
+        elif re.search(r"去掉|平掉|删除|不要|清掉|remove|close|drop|exit|get rid of", low):
             a.positions = [p for p in a.positions if p.symbol != sym]
             notes.append("去掉 %s" % sym)
         else:
-            m = re.search(r"(?:改成|改为|加到|减到|调到|变成|=)\s*" + _AMOUNT, text)
+            m = re.search(r"(?:改成|改为|加到|减到|调到|变成|=|to|at)\s*" + _AMOUNT, text, re.I)
             if m:
                 new = _num(m.group(1), m.group(2))
                 for p in targets:
                     notes.append("%s %s %.0f → %.0f" % (sym, p.side, p.notional, new))
                     p.notional = new
-    m = re.search(r"(?:usdt|保证金).*?(加|增加|减|减少)\s*" + _AMOUNT, low)
+    m = re.search(r"(?:usdt|保证金|margin|collateral).*?(加|增加|减|减少|add|more|top up|increase|reduce|cut|less|withdraw)\s*" + _AMOUNT, low)         or re.search(r"(加|增加|减|减少|add|top up|increase|reduce|cut|withdraw)\s*" + _AMOUNT + r"\s*(?:usdt|保证金|margin|collateral)", low)
     if m and not syms:
-        delta = _num(m.group(2), m.group(3)) * (1 if m.group(1).startswith(("加", "增")) else -1)
+        up = m.group(1).startswith(("加", "增", "add", "more", "top", "incr"))
+        delta = _num(m.group(2), m.group(3)) * (1 if up else -1)
         notes.append("USDT %.0f → %.0f" % (a.usdt, a.usdt + delta))
         a.usdt += delta
     if not notes:

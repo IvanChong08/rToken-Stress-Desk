@@ -48,13 +48,14 @@ except Exception:
 
 LOG_PATH = os.path.join(ROOT, "data", "calls_app.jsonl")
 USED_SKILL_TOOLS = {"technical_analysis.atr"}   # 与 desk/card.py 里实际调用的 Skill 工具保持一致
-TRADE_EXAMPLES = ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "MSTR 5倍做多 过周末", "英伟达财报前 5x 做多"]
+# 中英文都走规则解析 (瞬间完成, 不消耗大模型额度); 英文示例放最后一个, 让人一眼看到能用英文问
+TRADE_EXAMPLES = ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "MSTR 5倍做多 过周末", "3x long NVDA over the weekend"]
 PF_EXAMPLES = [
     "0.1 BTC 和 5000 USDT 做保证金，做多 NVDA 15000U、MSTR 8000U、COIN 5000U，做空 SPY 5000U",
     "保证金 2万U, 多英伟达 1.5万, 多特斯拉 1万, 空纳指 1万",
-    "0.3 BTC 做保证金, 做多 MSTR 20000U, 做多 COIN 10000U",
+    "long NVDA 15000, short SPY 5000, 0.1 BTC as margin",
 ]
-PF_FOLLOWUPS = ["把 MSTR 砍半呢", "BTC 全部换成 USDT 呢", "保证金再加 3000u 呢"]
+PF_FOLLOWUPS = ["把 MSTR 砍半呢", "BTC 全部换成 USDT 呢", "halve MSTR"]
 
 st.set_page_config(page_title="rToken Stress Desk", page_icon="🧯", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(ui.CSS, unsafe_allow_html=True)
@@ -236,9 +237,12 @@ with tab_pf:
                     "类型": st.column_config.SelectboxColumn(options=["杠杆", "现货"], required=True, width="small"),
                     "方向": st.column_config.SelectboxColumn(options=["做多", "做空"], required=True, width="small"),
                     "买入价": st.column_config.TextColumn(width="small", help="留空 = 当作刚开仓 (浮盈浮亏按 0 算)"),
-                    "数量": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%g"),
-                    "名义 USDT": st.column_config.NumberColumn(min_value=0.0, step=500.0, format="%.0f",
-                                                             disabled=auto, help="勾了自动算时由 数量 × 当前价 得出"),
+                    # 代币化美股本来就是买零碎份额用的: Bitget 数量精度 4 位 = 最小 0.0001 股。
+                    # step 给 1 会把 0.2、0.005 这种直接卡掉 (买不起整股正是 rToken 的意义)。
+                    "数量": st.column_config.NumberColumn(min_value=0.0, step=0.0001, format="%g",
+                                                         help="可以填小数, 最小 0.0001 股 (Bitget 数量精度 4 位)"),
+                    "名义 USDT": st.column_config.NumberColumn(min_value=0.0, format="%.2f", disabled=auto,
+                                                             help="勾了自动算时由 数量 × 当前价 得出; Bitget 单笔最小 10 USDT"),
                 })
             u1, u2, u3 = st.columns(3)
             usdt = u1.number_input("USDT 保证金", min_value=0.0, value=float(acc.usdt), step=500.0, key="pf_usdt_%d" % ver)
@@ -391,7 +395,7 @@ with tab_trade:
         if last is None:
             return None
         d = dataclasses.asdict(last)
-        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:x|X|倍)", text)
+        m = re.search(r"(\d+(?:\.\d+)?)\s*(?:x|X|×|倍|times?|-?fold)", text)
         if m:
             d["leverage"] = float(m.group(1))
         if re.search(r"做空|空单|short", text.lower()):

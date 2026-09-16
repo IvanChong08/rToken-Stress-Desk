@@ -31,7 +31,7 @@ def position_rows(positions, prices):
     for p in positions:
         qty = p.qty
         if not qty and prices.get(p.symbol):
-            qty = round(p.notional / prices[p.symbol], 4)
+            qty = round(p.notional / prices[p.symbol], 6)   # 贵的票 4 位小数不够, 显示多留两位
         rows.append({
             "标的": p.symbol,
             "类型": KIND_CN.get(p.kind, "杠杆"),

@@ -82,7 +82,7 @@ def parse_rules(text: str) -> TradeIdea | None:
             if m.upper() in TRADE_SUPPORTED:
                 symbol = m.upper()
                 break
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:x|X|倍)", t)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:x|X|×|倍|times?|-?fold)", t)
     leverage = float(m.group(1)) if m else 1.0
     side = "short" if re.search(r"做空|空单|看空|short", low) else "long"
     # 「周末」优先: 「周五收盘前…过周末」里的「收盘前」不能被当成「盘前」(测试用例抓到的 bug)

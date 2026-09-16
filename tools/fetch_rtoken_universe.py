@@ -30,7 +30,7 @@ FUT_URL = "https://api.bitget.com/api/v2/mix/market/contracts?productType=USDT-F
 
 
 def from_bitget() -> dict:
-    """在 AWS 上跑: 只用标准库。"""
+    """在 AWS 上跑: 只用标准库。顺便带回每只的下单限制 (最小金额 / 数量精度)。"""
     import urllib.request
 
     def get(url):
@@ -41,30 +41,43 @@ def from_bitget() -> dict:
             if s.get("status") == "online" and str(s.get("baseCoin", "")).startswith("r")
             and s.get("quoteCoin") == "USDT"]
     fut = [c["baseCoin"] for c in get(FUT_URL) if c.get("symbolStatus") == "normal"]
+    limits = {s["baseCoin"][1:].upper(): {"pair": s["symbol"],
+                                         "min_usdt": float(s.get("minTradeUSDT") or 0),
+                                         "qty_precision": int(s.get("quantityPrecision") or 4)}
+              for s in spot}
     return {"asof": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-            "spot": sorted({s["baseCoin"][1:].upper() for s in spot}),
-            "spot_symbols": {s["baseCoin"][1:].upper(): s["symbol"] for s in spot},
+            "spot": sorted(limits),
+            "limits": limits,
             "futures": sorted(set(fut))}
 
 
-def check_yahoo(tickers: list[str], futures: set[str], pause: float = 0.25) -> dict:
-    """本机跑: 逐个查 Yahoo 5 年日线。Yahoo 没有 = 不收录 (多半是同名的币, 或已退市)。"""
+def check_yahoo(tickers: list[str], limits: dict, known: dict | None = None, pause: float = 0.25) -> dict:
+    """本机跑: 逐个查 Yahoo 5 年日线。Yahoo 没有 = 不收录 (多半是同名的币, 或已退市)。
+    known: 上一版清单里已经查过的, 直接沿用 —— Bitget 一批批上新, 每次全量重查太慢。"""
     sys.path.insert(0, __file__.rsplit("tools", 1)[0])
     from desk.sources import yahoo
 
-    ok, bad = {}, {}
+    known = known or {}
+    ok, bad, reused = {}, {}, 0
     for i, t in enumerate(tickers, 1):
+        lim = limits.get(t, {})
+        if t in known:
+            ok[t] = {**known[t], **{k: lim[k] for k in ("min_usdt", "qty_precision") if k in lim}}
+            reused += 1
+            continue
         ysym = t.replace(".", "-")                    # BRK.B -> BRK-B
         df, prov = yahoo.ohlcv(ysym, "5y", "1d")
         if df is not None and len(df) >= 250:         # 至少一年日线才算数
             ok[t] = {"yahoo": ysym, "days": len(df),
                      "first": str(df.ts.iloc[0].date()), "last": str(df.ts.iloc[-1].date()),
-                     "futures": t in futures}
+                     "futures": False,
+                     "min_usdt": lim.get("min_usdt", 0.0), "qty_precision": lim.get("qty_precision", 4)}
         else:
             bad[t] = (prov.error or "")[:80] or "日线不足 %d 根" % (0 if df is None else len(df))
         if i % 50 == 0:
-            print("  %d/%d  收录 %d  跳过 %d" % (i, len(tickers), len(ok), len(bad)), flush=True)
+            print("  %d/%d  收录 %d  跳过 %d  (沿用上一版 %d)" % (i, len(tickers), len(ok), len(bad), reused), flush=True)
         time.sleep(pause)
+    print("  沿用上一版 %d 只, 本次新查 %d 只" % (reused, len(tickers) - reused), flush=True)
     return {"ok": ok, "skipped": bad}
 
 
@@ -120,7 +133,12 @@ if __name__ == "__main__":
     elif "--yahoo" in sys.argv:
         raw = json.load(open(sys.argv[sys.argv.index("--yahoo") + 1], encoding="utf-8"))
         print("Bitget 现货 rToken %d 个 (asof %s), 开始核对 Yahoo..." % (len(raw["spot"]), raw["asof"]), flush=True)
-        res = check_yahoo(raw["spot"], set(raw["futures"]))
+        try:
+            prev = json.load(open(__file__.rsplit("tools", 1)[0] + "data/rtoken_universe.json", encoding="utf-8"))
+            known = {k: v for k, v in prev["symbols"].items()}
+        except (OSError, ValueError):
+            known = {}
+        res = check_yahoo(raw["spot"], raw.get("limits", {}), known)
         out = {"asof_bitget": raw["asof"], "asof_yahoo": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
                "source": {"bitget_spot": SPOT_URL, "bitget_futures": FUT_URL, "yahoo": "v8/finance/chart"},
                "n_bitget": len(raw["spot"]), "n_supported": len(res["ok"]),
