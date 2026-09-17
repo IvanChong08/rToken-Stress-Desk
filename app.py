@@ -48,6 +48,17 @@ except Exception:
 
 LOG_PATH = os.path.join(ROOT, "data", "calls_app.jsonl")
 USED_SKILL_TOOLS = {"technical_analysis.atr"}   # 与 desk/card.py 里实际调用的 Skill 工具保持一致
+# Skill 的这几个工具在对方服务器上长期取不到上游数据 (09-14 / 09-17 两次实测一致)。
+# 同样的上游我们直连都正常, 所以这里写清楚每一个「失败了改用什么」, 而不是只摆一排红叉。
+SKILL_FALLBACK = {
+    "technical_analysis.atr": "单笔页面的 BTC 日均真实波幅",
+    "crypto_derivatives.price": "BTC/ETH 价格 (雷达里另有 CoinGecko + Deribit + Yahoo 三源交叉核对)",
+    "sentiment_index.current": "直连 alternative.me (雷达里的加密恐惧贪婪)",
+    "global_assets.price": "直连 Yahoo Finance (美股价格, 雷达里再与 Nasdaq 交叉核对)",
+    "crypto_market.global": "直连 CoinGecko (加密总市值 / BTC 占比)",
+    "rates_yields.fed_funds": "不使用 —— 本工具不做宏观利率",
+    "news_feed.latest": "不使用 —— 明确不做新闻解读 (无法逐句溯源)",
+}
 # 中英文都走规则解析 (瞬间完成, 不消耗大模型额度); 英文示例放最后一个, 让人一眼看到能用英文问
 TRADE_EXAMPLES = ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "MSTR 5倍做多 过周末", "3x long NVDA over the weekend"]
 PF_EXAMPLES = [
@@ -69,8 +80,13 @@ def get_log() -> CallLog:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def mcp_health() -> dict:
-    """全部 Skill 工具探测: 只在用户点击时运行 (坏工具各要等约 8 秒)。"""
-    client = mcp.MCPClient(timeout=8)
+    """
+    全部 Skill 工具探测: 只在用户点击时运行。并行, 总耗时约等于单个超时。
+    超时给 22 秒而不是 8 秒 —— 坏掉的工具要 16~31 秒才会返回**它自己**的错误
+    (alt_me_error / ConnectTimeout / all feeds errored), 8 秒会在那之前被我们掐断,
+    显示成我们这边的 ReadTimeout, 看起来像是我们的网络问题。
+    """
+    client = mcp.MCPClient(timeout=22)
     try:
         info = client.connect()
     except Exception as e:
@@ -530,16 +546,27 @@ with tab_radar:
 with st.expander("数据源详情 · Bitget Skill 全部工具检测"):
     st.caption("算分用的数据: 美股与 BTC 日线来自 Yahoo Finance; rToken 小时线来自 Bitget 公共接口 (缓存)。"
                "Bitget 官方研究 Skill 本工具只用 BTC 波幅 (ATR), 其余工具不参与计分。")
-    if st.button("开始检测 (约 10 秒)", key="probe_all_btn"):
+    if st.button("开始检测 (约 25 秒)", key="probe_all_btn"):
         st.session_state["probe_all_result"] = mcp_health()
     h = st.session_state.get("probe_all_result")
     if h is not None:
         if h["server"] is None:
             st.write("连接失败: %s" % h["error"])
         else:
-            st.markdown("  \n".join(("OK · " if p["ok"] else "失败 · ") + p["endpoint"]
-                                    + (" (在用)" if p["endpoint"] in USED_SKILL_TOOLS else "") for p in h["probes"]))
-            st.caption("失败的是对方服务器 (2026-09-14 从两台机器实测一致)")
+            rows = []
+            for p in h["probes"]:
+                ep = p["endpoint"]
+                if p["ok"]:
+                    note = "在用: " + SKILL_FALLBACK[ep] if ep in USED_SKILL_TOOLS else SKILL_FALLBACK.get(ep, "")
+                else:
+                    note = "我们改用: " + SKILL_FALLBACK.get(ep, "本工具不使用这类数据")
+                rows.append({"Skill 工具": ep, "状态": "OK" if p["ok"] else "失败",
+                             "耗时": "%d ms" % p["latency_ms"], "说明": note,
+                             "对方服务器报的错": (p.get("error") or "")[:60]})
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+            st.caption("失败的都是**对方服务器**在取上游数据时报的错 (alt_me_error / ConnectTimeout / all feeds errored), "
+                       "2026-09-14 与 09-17 两次、两台机器结果一致。同样这几个上游源, 本工具直连全部正常 —— "
+                       "所以雷达里的恐惧贪婪、加密总市值、美股价格照常有数据, 只是不经过 Skill。")
 
 
 # ---------------------------------------------------------------- 顶栏 (最后再更新一次: 反映本次取数结果与 Skill 检测)
