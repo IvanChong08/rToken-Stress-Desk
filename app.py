@@ -386,9 +386,13 @@ with tab_pf:
                      "等十几秒再点一次「运行压力测试」通常就好了。" % str(e)[:120])
     rep = st.session_state.get("pf_report")
 
+    # 位置先占住 (st.empty 不占视觉空间): 空状态卡和四张结果卡交替出现时,
+    # 元素结构保持不变, 浏览器端才不会把上一轮的卡片留在页面上变成残影
+    ph_empty, ph_score, ph_plans, ph_quake, ph_evid = (st.empty() for _ in range(5))
+
     # ---- 还没有结果: 用「你想做什么」代替空图表 ----
     if rep is None:
-        with st.container(key="card_empty"):
+        with ph_empty.container(key="card_empty"):
             html(ui.card_head("你想做什么?", "三种用法, 选一个开始"))
             e1, e2, e3 = st.columns(3, gap="medium")
             with e1:
@@ -431,7 +435,7 @@ with tab_pf:
         rule_short = ("分数 = 100 − 用掉的强平距离; 触及强平记 0 分。60 分以上算稳健, 30 分以下算危险。"
                       if not pf_spot_only else "全是现货: 分数 = 100 − 亏掉的本金比例。60 分以上算稳健。")
 
-        with st.container(key="card_score"):
+        with ph_score.container(key="card_score"):
             html(ui.card_head("安全分", "5 年 %d 个交易日重演 · 总分取三项里最低的一项" % len(rep.daily_dates)))
             html(ui.score_grid(sc["overall"], score.grade(sc["overall"]), sc["weakest_label"],
                                sc["items"], verdict, rule_short))
@@ -455,7 +459,7 @@ with tab_pf:
                 html(ui.ruler(sc["items"], "本金亏光" if pf_spot_only else "强平"))
                 st.caption("规则: " + sc["rule"])
 
-        with st.container(key="card_plans"):
+        with ph_plans.container(key="card_plans"):
             html(ui.card_head("调整方案", "每个方案都用同一套历史重新打分"))
             cols = st.columns(max(len(rep.suggestions), 1), gap="medium")
             for col, s in zip(cols, rep.suggestions):
@@ -486,7 +490,7 @@ with tab_pf:
                             if step["note"]:
                                 st.caption(step["note"])
 
-        with st.container(key="card_quake"):
+        with ph_quake.container(key="card_quake"):
             html(ui.card_head("放回过去 5 年的每一天",
                               "%s → %s · 每根线 = 当天账户亏损 (各资产最差价同时出现)"
                               % (rep.daily_dates[0], rep.daily_dates[-1])))
@@ -502,7 +506,8 @@ with tab_pf:
                 x2.dataframe(pd.DataFrame(rep.presets), width="stretch", hide_index=True)
                 st.dataframe(pd.DataFrame(rep.worst_days), width="stretch", hide_index=True)
 
-        html(ui.evidence_bar(sc["evidence"]))
+        with ph_evid.container():
+            html(ui.evidence_bar(sc["evidence"]))
         f1, f2, f3 = st.columns(3)
         with f1.expander("事实表与来源 (%d 条)" % len(rep.facts)):
             render_facts(rep.facts)
