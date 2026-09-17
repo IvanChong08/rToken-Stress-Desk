@@ -68,7 +68,7 @@ PF_EXAMPLES = [
 ]
 PF_FOLLOWUPS = ["把 MSTR 砍半呢", "BTC 全部换成 USDT 呢", "halve MSTR"]
 
-st.set_page_config(page_title="rToken Stress Desk", page_icon="🧯", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="rToken Stress Desk", page_icon="🧯", layout="wide", initial_sidebar_state="auto")
 st.markdown(ui.CSS, unsafe_allow_html=True)
 
 
@@ -221,9 +221,12 @@ with tab_pf:
         st.session_state["pf_how"] = "由规则解析为新组合 (示例)"
         _log = get_log()
         _a = st.session_state["pf_account"]
-        with st.spinner("取 5 年行情并重演中..."):
-            _panel = get_panel(tuple(sorted({p.symbol for p in _a.positions})), _log)
-            st.session_state["pf_report"] = pcard.build_report(_a, _panel, log=_log, use_llm=False)
+        try:
+            with st.spinner("取 5 年行情并重演中..."):
+                _panel = get_panel(tuple(sorted({p.symbol for p in _a.positions})), _log)
+                st.session_state["pf_report"] = pcard.build_report(_a, _panel, log=_log, use_llm=False)
+        except Exception as e:      # noqa: BLE001
+            st.error("取行情失败: %s。等十几秒再点一次「运行压力测试」。" % str(e)[:120])
 
     acc: pf.Account = st.session_state["pf_account"]
     rep_before = st.session_state.get("pf_report")
@@ -234,7 +237,7 @@ with tab_pf:
             g_left, g_right = st.columns([13, 2], vertical_alignment="center")
             with g_left:
                 html(ui.guide_strip())
-            if g_right.button("收起", key="guide_dismiss", width="stretch"):
+            if g_right.button("收起", key="dismiss_guide", width="stretch"):
                 st.session_state["guide_off"] = True
 
     run_now = False
@@ -343,10 +346,14 @@ with tab_pf:
     demo_autorun = st.query_params.get("demo") == "1" and "pf_report" not in st.session_state
     if (go or run_now or demo_autorun) and not err:
         log = get_log()
-        with st.spinner("取 5 年行情并重演中..."):
-            panel = get_panel(tuple(sorted({p.symbol for p in cur.positions})), log)
-            st.session_state["pf_account"] = cur
-            st.session_state["pf_report"] = pcard.build_report(cur, panel, log=log, use_llm=False)
+        try:
+            with st.spinner("取 5 年行情并重演中..."):
+                panel = get_panel(tuple(sorted({p.symbol for p in cur.positions})), log)
+                st.session_state["pf_account"] = cur
+                st.session_state["pf_report"] = pcard.build_report(cur, panel, log=log, use_llm=False)
+        except Exception as e:      # noqa: BLE001  取数失败要给人话, 不能甩一个 Streamlit 报错页
+            st.error("取行情失败, 没能跑完压力测试: %s。数据源是 Yahoo Finance, 偶尔会限流 —— "
+                     "等十几秒再点一次「运行压力测试」通常就好了。" % str(e)[:120])
     rep = st.session_state.get("pf_report")
 
     # ---- 还没有结果: 用「你想做什么」代替空图表 ----

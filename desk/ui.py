@@ -31,17 +31,21 @@ html, body, [class*="st-"], button, input, textarea, select {
 /* 标签栏: 文字 + 下划线, 不用色块 */
 [data-testid="stTabs"] [role="tablist"] { gap: 26px !important; border-bottom: 1px solid #e6e7ea; margin-bottom: 4px; }
 [data-testid="stTabs"] [role="tab"] { padding: 6px 0 !important; height: auto !important; min-width: 0 !important; flex: none !important; }
-[data-testid="stTabs"] [role="tab"] p { font-size: 15px !important; color: #8b8f98; }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] p { color: #16181d; font-weight: 700; }
+[data-testid="stTabs"] [role="tab"], [data-testid="stTabs"] [role="tab"] * { color: #8b8f98 !important; font-size: 15px !important; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"], [data-testid="stTabs"] [role="tab"][aria-selected="true"] * {
+  color: #16181d !important; font-weight: 700 !important; }
 [data-baseweb="tab-highlight"] { background: #16181d !important; height: 2px !important; }
 [data-baseweb="tab-border"], .react-aria-SelectionIndicator { display: none !important; }
 
-/* 卡片: 每个 st.container(key=...) 都是一张卡 (panel_ 是单笔 / 雷达两页沿用的旧键名) */
-div[class*="st-key-card_"], div[class*="st-key-panel_"] {
+/* 卡片: 每个 st.container(key=...) 都是一张卡 (panel_ 是单笔 / 雷达两页沿用的旧键名)。
+   用精确 class: [class*="st-key-card_"] 这种前缀写法会连带命中 key 同前缀的控件,
+   09-17 实测按钮 key="guide_dismiss" 就被套了第二层边框。 */
+div.st-key-card_hold, div.st-key-card_score, div.st-key-card_plans, div.st-key-card_quake, div.st-key-card_empty,
+div.st-key-panel_01, div.st-key-panel_02, div.st-key-panel_03, div.st-key-panel_04, div.st-key-panel_05, div.st-key-panel_06 {
   background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 16px 20px 6px; margin-bottom: 14px; }
-div[class*="st-key-guide"] {
+div.st-key-guide {
   background: #ffffff; border: 1px solid #e6e7ea; border-radius: 8px; padding: 8px 14px 0; margin-bottom: 12px; }
-div[class*="st-key-ecard_"] {
+div.st-key-ecard_1, div.st-key-ecard_2, div.st-key-ecard_3 {
   background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 14px 16px 6px; height: 100%; }
 
 /* 按钮 */
@@ -73,8 +77,16 @@ div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 
 
 /* 侧栏 */
 [data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e6e7ea; }
+[data-testid="stSidebar"] label p, [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: #2c2f36; font-size: 13px; }
 [data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 [data-testid="stSidebar"] [data-testid="stSliderTickBarMin"], [data-testid="stSidebar"] [data-testid="stSliderTickBarMax"] { display: none; }
+
+/* 分数四格: 窄屏折成两列 */
+.rsd-grid4 { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr; gap: 0; }
+@media (max-width: 820px) {
+  .rsd-grid4 { grid-template-columns: 1fr 1fr; row-gap: 14px; }
+  .rsd-grid4 > div { border-right: 0 !important; padding-left: 0 !important; }
+}
 
 /* 通用小件 */
 .rsd-table { border-collapse: collapse; width: 100%; }
@@ -95,8 +107,8 @@ def grade_color(s: float) -> str:
 
 # ---------------------------------------------------------------- 侧栏
 def brand() -> str:
-    return ('<div style="font-weight:700;font-size:15px;color:%s;line-height:1.35;">rToken Stress Desk'
-            '<div style="font-weight:400;font-size:11.5px;color:%s;margin-top:2px;">开仓前的压力测试台</div></div>'
+    return ('<div style="font-weight:700;font-size:19px;color:%s;line-height:1.3;letter-spacing:-0.01em;">rToken Stress Desk'
+            '<div style="font-weight:400;font-size:12px;color:%s;margin-top:3px;">开仓前的压力测试台</div></div>'
             % (INK, MUTED))
 
 
@@ -229,7 +241,7 @@ def score_grid(overall: float, grade: str, weakest_label: str, items: list[dict]
                   '<i style="position:absolute;left:0;top:0;bottom:0;width:%.0f%%;background:%s;"></i></div>'
                   '<div style="font-size:11.5px;color:%s;">%s</div></div>'
                   % (border, MUTED, esc(it["label"]), col, round(it["score"]), LINE2, used, col, MUTED, esc(it["detail"])))
-    return ('<div style="display:grid;grid-template-columns:1.25fr 1fr 1fr 1fr;gap:0;">%s</div>'
+    return ('<div class="rsd-grid4">%s</div>'
             '<div style="margin-top:14px;padding-top:13px;border-top:1px solid %s;font-size:14px;color:%s;">%s'
             '<div style="color:%s;font-size:12.5px;margin-top:3px;">%s</div></div>'
             % (cells, LINE2, INK, verdict, MUTED, esc(rule)))

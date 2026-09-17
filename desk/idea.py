@@ -156,6 +156,20 @@ def parse(text: str, provider: str | None = None):
     bad = unsupported_message(text)
     if bad:
         return None, [prov], bad + "。"
-    # 大模型的内部错误 (err) 只进调用记录, 不直接给用户看
+    # 说清楚到底卡在哪一步, 别一句「没识别出标的或参数」打发 (09-17 路径巡检发现):
+    # ① 这只票组合模式能测、单笔不行 ② 杠杆超出 1-20
+    low = text.lower()
+    hit = next((s for s in SUPPORTED - TRADE_SUPPORTED
+                if re.search(r"(?<![A-Za-z])%s(?![A-Za-z])" % s.lower(), low)), None)
+    if hit is None:
+        hit = next((sym for alias, sym in ALIASES.items()
+                    if alias in low and sym in SUPPORTED - TRADE_SUPPORTED), None)
+    if hit:
+        return None, [prov], ("%s 在单笔模式里测不了 (要 rToken 小时线, 本地只缓存了 %d 只)。"
+                              "用「组合压力测试」那一页就能测 —— 那边用正股 5 年日线重演, %s 只标的全都支持。"
+                              % (hit, len(TRADE_SUPPORTED), format(len(SUPPORTED), ",")))
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:x|X|×|倍|times?|-?fold)", text)
+    if m and not (1 <= float(m.group(1)) <= 20):
+        return None, [prov], "杠杆只支持 1–20 倍, 你写的是 %s 倍。" % m.group(1)
     return None, [prov], ("没识别出标的或参数。单笔模式支持 %s; 杠杆 1-20 倍。"
                           "例: 「周五收盘前 3 倍做多 NVDA 过周末」" % "、".join(sorted(TRADE_SUPPORTED)))
