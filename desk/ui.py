@@ -25,7 +25,11 @@ html, body, [class*="st-"], button, input, textarea, select {
 [data-testid="stIconMaterial"] { font-family: "Material Symbols Rounded" !important; }
 
 .stApp { background: #f6f7f8; }
-.block-container { padding-top: 1.1rem !important; padding-bottom: 3rem !important; max-width: 1240px; }
+/* 顶部留白必须给 Streamlit Cloud 的工具条 (Share / ☆ / ✎) 让位 ——
+   那条是盖在页面上的, 压到 1.1rem 会把第一行 (标签栏) 整个藏到它下面。
+   登录的人看得见工具条, 匿名访客看不见, 所以本地和匿名截图都正常, 只有 app 主人看不到标签。 */
+.block-container { padding-top: 3.6rem !important; padding-bottom: 3rem !important; max-width: 1240px; }
+[data-testid="stToolbar"] { z-index: 5; }
 #MainMenu, footer, [data-testid="stDecoration"] { display: none; }
 
 /* 标签栏: 文字 + 下划线, 不用色块 */
