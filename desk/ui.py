@@ -1,103 +1,168 @@
 """
-网页样式与 HTML 片段 —— 定稿设计「B1 危险警示风格 + B2 排版」(设计稿 2026-09-16)。
+网页样式与 HTML 片段 —— 白底模板 (2026-09-17 定稿, 取代原来的橙黑警示风)。
 
 只负责展示: 这里不计算任何数字, 所有数值都来自 portfolio_card / card / score 已经算好的结果。
 注意: st.markdown 会把行首缩进 4 格的内容当代码块, 所以所有 HTML 都拼成单行。
+
+配色只做三件事: 中性灰做结构 / 语义色 (红黄绿) 只给分数和涨跌 / 黑色只给主按钮。
+原生组件 (表格、输入框、滑块) 的底色来自 .streamlit/config.toml 的 base="light", CSS 盖不住那一层。
 """
 from __future__ import annotations
 
-import html
 import re
 
-BG, PANEL, LINE, LINE2 = "#121210", "#1a1a17", "#2e2d28", "#25241f"
-TEXT, MUTED, SOFT, STENCIL = "#ece7dc", "#85806f", "#c9c3b5", "#5a574c"
-ORANGE, RED, GREEN = "#f08a24", "#ff4a3d", "#7fd67a"
+BG, CARD, LINE, LINE2 = "#f6f7f8", "#ffffff", "#e6e7ea", "#f0f1f3"
+INK, TEXT, SOFT, MUTED = "#16181d", "#2c2f36", "#5b606b", "#8b8f98"
+RED, AMBER, GREEN, BLUE = "#d64027", "#e08a1e", "#1a9e5f", "#2f6fd0"
+ORANGE = AMBER              # 旧名字, 保留给还没改的调用点
 
 CSS = """<style>
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
-html, body, .stApp, [data-testid="stAppViewContainer"] { background: #121210; color: #ece7dc; }
-.stApp, .stApp p, .stApp label, .stApp li, .stApp td, .stApp th, .stApp button, .stApp input, .stApp textarea, .stApp [data-testid="stMarkdownContainer"] { font-family: "Chakra Petch", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
-[data-testid="stIconMaterial"], .material-symbols-rounded { font-family: "Material Symbols Rounded" !important; }
-[data-testid="stHeader"] { background: transparent; }
-[data-testid="stMainBlockContainer"] { padding-top: 0.6rem; max-width: 1480px; }
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+
+html, body, [class*="st-"], button, input, textarea, select {
+  font-family: "Noto Sans SC", "PingFang SC", system-ui, sans-serif; }
 .m, .m * { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace !important; font-variant-numeric: tabular-nums; }
-.rsd-tape { height: 10px; background: repeating-linear-gradient(135deg, #f08a24 0 14px, #121210 14px 28px); }
-.rsd-tape-thin { background: repeating-linear-gradient(135deg, #f08a24 0 6px, #121210 6px 12px); }
-.rsd-stencil { font-family: "JetBrains Mono", ui-monospace, monospace !important; font-weight: 700; color: transparent; -webkit-text-stroke: 1px #5a574c; font-size: 38px; line-height: 1; }
-div[class*="st-key-panel"] { background: #1a1a17; border: 1px solid #2e2d28; padding: 20px 22px 16px; position: relative; }
-div[class*="st-key-panel"]::before { content: ""; position: absolute; top: -1px; left: -1px; width: 14px; height: 14px; border-top: 3px solid #f08a24; border-left: 3px solid #f08a24; pointer-events: none; }
-div[class*="st-key-panel"]::after { content: ""; position: absolute; bottom: -1px; right: -1px; width: 14px; height: 14px; border-bottom: 3px solid #f08a24; border-right: 3px solid #f08a24; pointer-events: none; }
-.stButton button, [data-testid="stPopover"] button { border-radius: 0 !important; border: 1px solid #2e2d28 !important; background: #121210 !important; color: #ece7dc !important; }
-.stButton button:hover, [data-testid="stPopover"] button:hover { border-color: #f08a24 !important; color: #f08a24 !important; }
-.stButton button[kind="primary"], [data-testid^="stBaseButton-primary"] { background: #f08a24 !important; color: #121210 !important; border: none !important; font-weight: 700 !important; letter-spacing: 0.1em; clip-path: polygon(0 0, 100% 0, 100% 70%, 96% 100%, 0 100%); }
-[data-testid="stLinkButton"] a { border-radius: 0 !important; border: 1px solid #f08a24 !important; color: #f08a24 !important; background: transparent !important; }
-[data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="select"] > div { border-radius: 0 !important; background: #121210 !important; }
-/* 标签栏方案 2: 标签紧贴顶栏下沿, 做成同一条栏的一部分。
-   用 role= 选择器: 1.4x 的标签是 data-baseweb="tab", 新版换成了 data-testid="stTab" (react-aria),
-   只有 role 两边都在 —— 云端装的 Streamlit 比本地新, 按 baseweb 写的 CSS 在云端一条都不生效。
-   margin-top 只抵消 1px 边框: 顶栏会随状态灯个数折行 (本地 110px / 云端 60px),
-   按某一边的高度调负 margin, 到另一边就会盖住标题。 */
-[data-testid="stTabs"] [role="tablist"] { gap: 0 !important; border: 1px solid #2e2d28; width: fit-content !important; margin-top: -1px; }
-[data-testid="stTabs"] [role="tab"] { padding: 0 34px !important; height: 46px !important; min-width: 0 !important; flex: none !important; }
-[data-testid="stTabs"] [role="tab"] p { font-size: 16px !important; letter-spacing: 0.06em; }
-/* 输入框变主角; 示例按钮缩成小 chip */
-div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 34px; font-size: 15px; }
+[data-testid="stIconMaterial"] { font-family: "Material Symbols Rounded" !important; }
+
+.stApp { background: #f6f7f8; }
+.block-container { padding-top: 1.1rem !important; padding-bottom: 3rem !important; max-width: 1240px; }
+#MainMenu, footer, [data-testid="stDecoration"] { display: none; }
+
+/* 标签栏: 文字 + 下划线, 不用色块 */
+[data-testid="stTabs"] [role="tablist"] { gap: 26px !important; border-bottom: 1px solid #e6e7ea; margin-bottom: 4px; }
+[data-testid="stTabs"] [role="tab"] { padding: 6px 0 !important; height: auto !important; min-width: 0 !important; flex: none !important; }
+[data-testid="stTabs"] [role="tab"] p { font-size: 15px !important; color: #8b8f98; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] p { color: #16181d; font-weight: 700; }
+[data-baseweb="tab-highlight"] { background: #16181d !important; height: 2px !important; }
+[data-baseweb="tab-border"], .react-aria-SelectionIndicator { display: none !important; }
+
+/* 卡片: 每个 st.container(key=...) 都是一张卡 (panel_ 是单笔 / 雷达两页沿用的旧键名) */
+div[class*="st-key-card_"], div[class*="st-key-panel_"] {
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 16px 20px 6px; margin-bottom: 14px; }
+div[class*="st-key-guide"] {
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 8px; padding: 8px 14px 0; margin-bottom: 12px; }
+div[class*="st-key-ecard_"] {
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 14px 16px 6px; height: 100%; }
+
+/* 按钮 */
+.stButton button, [data-testid="stPopover"] button {
+  border-radius: 7px !important; border: 1px solid #e6e7ea !important; background: #ffffff !important; color: #16181d !important;
+  font-weight: 500 !important; }
+.stButton button:hover, [data-testid="stPopover"] button:hover { border-color: #16181d !important; color: #16181d !important; }
+.stButton button[kind="primary"], [data-testid^="stBaseButton-primary"] {
+  background: #16181d !important; color: #ffffff !important; border: 1px solid #16181d !important; font-weight: 500 !important; }
+[data-testid="stLinkButton"] a {
+  border-radius: 7px !important; border: 1px solid #e6e7ea !important; color: #16181d !important; background: #ffffff !important; }
+
+/* 示例 chip: 圆角小按钮 */
 div[class*="st-key-pf_ex_"] button, div[class*="st-key-pf_fu_"] button, div[class*="st-key-tr_ex_"] button {
-  min-height: 30px !important; padding: 2px 10px !important; }
+  min-height: 28px !important; padding: 1px 12px !important; border-radius: 20px !important; }
 div[class*="st-key-pf_ex_"] button p, div[class*="st-key-pf_fu_"] button p, div[class*="st-key-tr_ex_"] button p {
-  font-size: 12.5px !important; }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] { background: #f08a24 !important; }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] p { color: #121210 !important; font-weight: 700; }
-[data-baseweb="tab-highlight"], [data-baseweb="tab-border"], .react-aria-SelectionIndicator { display: none !important; }
-[data-testid="stExpander"] details { border-radius: 0; border-color: #2e2d28; }
-@keyframes rsdblink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
-.rsd-blink { animation: rsdblink 1s ease-in-out infinite; }
+  font-size: 12.5px !important; color: #5b606b !important; }
+
+/* 输入框 / 表格 */
+[data-baseweb="input"], [data-baseweb="select"] > div {
+  border-radius: 7px !important; background: #ffffff !important; border: 1px solid #e6e7ea !important; }
+[data-baseweb="input"]:focus-within { border-color: #16181d !important; }
+[data-baseweb="base-input"] { background: transparent !important; }
+[data-testid="stNumberInputContainer"] { border-radius: 7px !important; border: 1px solid #e6e7ea !important; }
+div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 36px; font-size: 14px; }
+[data-testid="stDataFrameResizable"] { border: 1px solid #e6e7ea !important; border-radius: 8px; }
+[data-testid="stExpander"] details { border-radius: 8px; border-color: #e6e7ea; background: #ffffff; }
+[data-testid="stExpander"] summary { font-size: 13px; color: #5b606b; }
+
+/* 侧栏 */
+[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e6e7ea; }
+[data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
+[data-testid="stSidebar"] [data-testid="stSliderTickBarMin"], [data-testid="stSidebar"] [data-testid="stSliderTickBarMax"] { display: none; }
+
+/* 通用小件 */
 .rsd-table { border-collapse: collapse; width: 100%; }
-.rsd-table th { text-align: left; font-weight: 600; color: #85806f; font-size: 12px; padding: 8px 10px; border-bottom: 2px solid #2e2d28; letter-spacing: 0.08em; }
-.rsd-table td { padding: 9px 10px; font-size: 14px; border-bottom: 1px solid #25241f; color: #ece7dc; }
+.rsd-table th { text-align: left; font-weight: 500; color: #8b8f98; font-size: 11.5px; padding: 7px 10px; border-bottom: 1px solid #e6e7ea; }
+.rsd-table td { padding: 9px 10px; font-size: 13px; border-bottom: 1px solid #f0f1f3; color: #2c2f36; }
+@keyframes rsdblink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+.rsd-blink { animation: rsdblink 1s ease-in-out infinite; }
 </style>"""
 
 
 def esc(x) -> str:
-    return html.escape(str(x))
+    return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def grade_color(s: float) -> str:
-    return RED if s < 30 else (ORANGE if s < 60 else GREEN)
+    return RED if s < 30 else (AMBER if s < 60 else GREEN)
 
 
-YELLOW = "#f5c542"
+# ---------------------------------------------------------------- 侧栏
+def brand() -> str:
+    return ('<div style="font-weight:700;font-size:15px;color:%s;line-height:1.35;">rToken Stress Desk'
+            '<div style="font-weight:400;font-size:11.5px;color:%s;margin-top:2px;">开仓前的压力测试台</div></div>'
+            % (INK, MUTED))
 
 
-def _status_item(ok, text: str) -> str:
-    """ok: True 正常(绿) / False 失败(红) / None 未运行(灰) / "pending" 检测中(黄色闪烁)。"""
-    if ok == "pending":
-        return ('<span class="rsd-blink" style="display:flex;align-items:center;gap:6px;color:%s;">'
-                '<svg width="8" height="8"><rect width="8" height="8" fill="%s"></rect></svg>%s</span>' % (YELLOW, YELLOW, esc(text)))
-    return ('<span style="display:flex;align-items:center;gap:6px;"><svg width="8" height="8"><rect width="8" height="8" fill="%s"></rect></svg>%s</span>'
-            % (GREEN if ok is True else (RED if ok is False else MUTED), esc(text)))
+def side_head(text: str) -> str:
+    return '<div style="font-size:11.5px;color:%s;letter-spacing:0.04em;margin:14px 0 2px;">%s</div>' % (MUTED, esc(text))
 
 
-def header(status: list[tuple], log_text: str) -> str:
-    items = "".join(_status_item(ok, t) for ok, t in status)
-    return ('<div class="rsd-tape"></div>'
-            '<div style="display:flex;align-items:center;gap:22px;padding:14px 2px 12px;border-bottom:1px solid %s;flex-wrap:wrap;">'
-            '<div style="display:flex;align-items:center;gap:12px;"><svg width="26" height="26" viewBox="0 0 28 28"><path d="M14 3 L26 24 H2 Z" fill="none" stroke="%s" stroke-width="2.5"></path><path d="M14 11 V17 M14 20 V21" stroke="%s" stroke-width="2.5"></path></svg>'
-            '<span style="font-size:21px;font-weight:700;letter-spacing:0.08em;">RTOKEN STRESS DESK</span></div>'
-            '<span style="font-size:13px;color:%s;">开仓前的压力测试台 · 每个数字都有来源 · 最终由你决定</span>'
-            '<div class="m" style="margin-left:auto;display:flex;align-items:center;gap:16px;font-size:12px;color:%s;flex-wrap:wrap;">%s'
-            '<span style="border:1px solid %s;padding:3px 8px;color:%s;">%s</span></div></div>'
-            % (LINE, ORANGE, ORANGE, MUTED, MUTED, items, LINE, SOFT, esc(log_text)))
+def status_rows(items: list[tuple]) -> str:
+    """侧栏的运行状态: ok=True 绿 / False 红 / None 灰 / "pending" 黄色闪烁。"""
+    rows = ""
+    for ok, label, right in items:
+        color = {True: GREEN, False: RED, None: "#c9ccd2"}.get(ok, AMBER)
+        cls = ' class="rsd-blink"' if ok == "pending" else ""
+        rows += ('<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2.5px 0;">'
+                 '<span%s style="width:6px;height:6px;border-radius:50%%;background:%s;flex:0 0 auto;"></span>'
+                 '<span style="color:%s;">%s</span>'
+                 '<span class="m" style="margin-left:auto;font-size:11px;color:%s;">%s</span></div>'
+                 % (cls, color, TEXT, esc(label), MUTED, esc(right)))
+    return rows
 
 
+def assume_note(text: str) -> str:
+    return '<div style="font-size:11px;color:%s;line-height:1.6;margin-top:6px;">%s</div>' % (MUTED, esc(text))
+
+
+# ---------------------------------------------------------------- 卡片骨架
+def card_head(title: str, hint: str = "") -> str:
+    return ('<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px;">'
+            '<span style="font-size:14.5px;font-weight:700;color:%s;">%s</span>'
+            '<span style="margin-left:auto;font-size:11.5px;color:%s;text-align:right;">%s</span></div>'
+            % (INK, esc(title), MUTED, esc(hint)))
+
+
+# 旧调用点还在用 panel_title(num, title, sub): 编号在白底模板里不再显示
 def panel_title(num: str, title: str, sub: str = "") -> str:
-    return ('<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:6px;">'
-            '<span class="rsd-stencil">%s</span><span style="font-size:18px;font-weight:700;letter-spacing:0.06em;">%s</span>'
-            '<span style="font-size:12px;color:%s;margin-left:auto;">%s</span></div>' % (esc(num), esc(title), MUTED, esc(sub)))
+    return card_head(title, sub)
 
 
-def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: int = 200) -> str:
-    """5 年地震图: 每个交易日的账户亏损 (向下), 强平线画成警示胶带。"""
+def guide_strip() -> str:
+    steps = [("1", "说出你的持仓", "一句话, 或在表里填"),
+             ("2", "点「运行压力测试」", "约 10 秒"),
+             ("3", "看分数和调整方案", "分数越低越危险")]
+    cells = ""
+    for i, (n, t, s) in enumerate(steps):
+        border = "" if i == len(steps) - 1 else "border-right:1px solid %s;" % LINE2
+        cells += ('<div style="flex:1 1 200px;display:flex;gap:10px;padding:9px 15px;%s">'
+                  '<span class="m" style="font-weight:700;color:%s;font-size:13px;background:%s;width:21px;height:21px;'
+                  'display:flex;align-items:center;justify-content:center;flex:0 0 auto;border-radius:4px;">%s</span>'
+                  '<span><b style="display:block;font-size:13px;color:%s;font-weight:500;">%s</b>'
+                  '<span style="color:%s;font-size:11.5px;">%s</span></span></div>'
+                  % (border, INK, LINE2, n, INK, esc(t), MUTED, esc(s)))
+    return '<div style="display:flex;flex-wrap:wrap;">%s</div>' % cells
+
+
+def empty_card(icon: str, title: str, body: str) -> str:
+    return ('<div style="display:flex;flex-direction:column;gap:6px;">'
+            '<div style="width:26px;height:26px;border-radius:6px;background:%s;display:flex;align-items:center;'
+            'justify-content:center;font-size:14px;color:%s;">%s</div>'
+            '<div style="font-size:14px;color:%s;font-weight:500;">%s</div>'
+            '<div style="color:%s;font-size:12.5px;min-height:40px;">%s</div></div>'
+            % (LINE2, SOFT, esc(icon), INK, esc(title), MUTED, esc(body)))
+
+
+# ---------------------------------------------------------------- 地震图
+def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: int = 190) -> str:
+    """5 年地震图: 每个交易日的账户亏损 (向下), 强平线是一条红色虚线。"""
     n = len(losses)
     if n < 2:
         return '<div style="color:%s;">样本不足, 无法绘制</div>' % MUTED
@@ -105,7 +170,6 @@ def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: 
     ys = [100 * min(max(x, 0.0), 1.0) for x in losses]
     pts = " ".join("%d,%.1f" % (i, y) for i, y in enumerate(ys))
     liq_top = height * min(max(liq_loss, 0.0), 1.0)
-    # 年份刻度
     ticks, seen = [], set()
     for i, d in enumerate(dates):
         y = d[:4]
@@ -113,7 +177,6 @@ def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: 
             seen.add(y)
             if i > 0:
                 ticks.append('<span style="position:absolute;left:%.2f%%;">%s</span>' % (100 * i / w, y))
-    # 最深的两根 (x 相隔 8% 以上), 标注日期与亏损
     order = sorted(range(n), key=lambda i: -losses[i])
     marks = []
     for i in order:
@@ -124,58 +187,81 @@ def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: 
     labels = ""
     for i in marks:
         x = 100 * i / w
-        top = height * min(max(losses[i], 0), 1) + 6
+        top = height * min(max(losses[i], 0), 1) + 4
         shift = -92 if x > 85 else (-8 if x < 12 else -50)
-        labels += ('<div style="position:absolute;left:%.2f%%;top:%.0fpx;height:16px;border-left:2px solid %s;"></div>'
-                   '<div class="m" style="position:absolute;left:%.2f%%;top:%.0fpx;transform:translateX(%d%%);font-size:11px;font-weight:700;color:%s;background:%s;padding:1px 6px;white-space:nowrap;">%s −%.1f%%</div>'
-                   % (x, top, TEXT, x, top + 18, shift, BG, TEXT, esc(dates[i]), 100 * losses[i]))
+        labels += ('<div style="position:absolute;left:%.2f%%;top:%.0fpx;height:14px;border-left:1px solid %s;"></div>'
+                   '<div class="m" style="position:absolute;left:%.2f%%;top:%.0fpx;transform:translateX(%d%%);font-size:11px;'
+                   'font-weight:500;color:%s;background:%s;padding:1px 6px;white-space:nowrap;border:1px solid %s;border-radius:4px;">%s −%.1f%%</div>'
+                   % (x, top, MUTED, x, top + 16, shift, TEXT, CARD, LINE, esc(dates[i]), 100 * losses[i]))
     return ('<div style="position:relative;height:%dpx;">'
             '<svg width="100%%" height="%d" viewBox="0 0 %d 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;">'
             '<line x1="0" y1="0.5" x2="%d" y2="0.5" stroke="%s" stroke-width="1" vector-effect="non-scaling-stroke"></line>'
-            '<line x1="0" y1="25" x2="%d" y2="25" stroke="%s" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"></line>'
             '<line x1="0" y1="50" x2="%d" y2="50" stroke="%s" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"></line>'
-            '<line x1="0" y1="75" x2="%d" y2="75" stroke="%s" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"></line>'
-            '<polygon points="0,0 %s %d,0" fill="%s" fill-opacity="0.16"></polygon>'
-            '<polyline points="%s" fill="none" stroke="%s" stroke-width="1" vector-effect="non-scaling-stroke"></polyline></svg>'
-            '<div class="rsd-tape-thin" style="position:absolute;left:0;right:0;top:%.0fpx;height:7px;"></div>'
-            '<div class="m" style="position:absolute;right:0;top:%.0fpx;font-size:11px;font-weight:700;color:%s;background:%s;padding:2px 8px;">强平线 · 亏损 %.1f%%</div>'
+            '<polyline points="%s" fill="none" stroke="%s" stroke-width="1" vector-effect="non-scaling-stroke" opacity="0.9"></polyline></svg>'
+            '<div style="position:absolute;left:0;right:0;top:%.0fpx;border-top:1.5px dashed %s;"></div>'
+            '<div class="m" style="position:absolute;right:0;top:%.0fpx;font-size:11px;color:%s;background:%s;padding:0 6px;">强平线 · 亏损 %.1f%%</div>'
             '<div class="m" style="position:absolute;left:0;top:2px;font-size:10px;color:%s;">0%%</div>'
             '<div class="m" style="position:absolute;left:0;top:%dpx;font-size:10px;color:%s;">50%%</div>%s</div>'
-            '<div class="m" style="position:relative;height:18px;margin-top:4px;font-size:10px;color:%s;">%s</div>'
-            % (height, height, w, w, STENCIL, w, LINE2, w, LINE2, w, LINE2, pts, w, RED, pts, RED,
-               liq_top - 4, max(liq_top - 28, 0), BG, ORANGE, 100 * liq_loss, MUTED, height // 2 + 2, MUTED, labels,
+            '<div class="m" style="position:relative;height:16px;margin-top:2px;font-size:10px;color:%s;">%s</div>'
+            % (height, height, w, w, LINE, w, LINE2, pts, RED,
+               liq_top, RED, max(liq_top - 20, 0), RED, CARD, 100 * liq_loss, MUTED, height // 2 + 2, MUTED, labels,
                MUTED, "".join(ticks)))
 
 
-def score_block(overall: float, weakest_label: str, grade: str) -> str:
+# ---------------------------------------------------------------- 分数
+def score_grid(overall: float, grade: str, weakest_label: str, items: list[dict], verdict: str, rule: str) -> str:
+    """四格: 总分 + 三个评分项 (细进度条 = 用掉多少强平距离)。"""
     c = grade_color(overall)
-    return ('<div style="display:flex;align-items:center;gap:20px;margin:4px 0 8px;">'
-            '<div class="m" style="font-size:96px;line-height:0.85;font-weight:700;color:%s;">%02d</div>'
-            '<div style="display:flex;flex-direction:column;gap:8px;">'
-            '<div class="rsd-tape" style="height:auto;padding:3px;align-self:flex-start;"><div style="background:%s;padding:5px 14px;font-size:18px;font-weight:700;color:%s;letter-spacing:0.1em;">%s</div></div>'
-            '<div style="font-size:14px;color:%s;">短板: %s</div>'
-            '<div style="font-size:12px;color:%s;">总分取各项最低分, 不取平均</div></div></div>'
-            % (c, round(overall), BG, c, esc(grade), SOFT, esc(weakest_label), MUTED))
+    cells = ('<div style="padding:2px 20px 2px 0;border-right:1px solid %s;">'
+             '<div style="font-size:12px;color:%s;">安全总分</div>'
+             '<div class="m" style="font-size:40px;font-weight:700;line-height:1.15;color:%s;">%d'
+             '<span style="font-size:12px;font-weight:700;margin-left:7px;">%s</span></div>'
+             '<div style="font-size:11.5px;color:%s;">短板: %s</div></div>'
+             % (LINE2, MUTED, c, round(overall), esc(grade), MUTED, esc(weakest_label)))
+    for k, it in enumerate(items):
+        col = grade_color(it["score"])
+        used = min(max(100 - it["score"], 0), 100)
+        border = "" if k == len(items) - 1 else "border-right:1px solid %s;" % LINE2
+        cells += ('<div style="padding:2px 20px;%s">'
+                  '<div style="font-size:12px;color:%s;">%s</div>'
+                  '<div class="m" style="font-size:40px;font-weight:700;line-height:1.15;color:%s;">%d</div>'
+                  '<div style="height:3px;background:%s;margin:8px 0 7px;position:relative;">'
+                  '<i style="position:absolute;left:0;top:0;bottom:0;width:%.0f%%;background:%s;"></i></div>'
+                  '<div style="font-size:11.5px;color:%s;">%s</div></div>'
+                  % (border, MUTED, esc(it["label"]), col, round(it["score"]), LINE2, used, col, MUTED, esc(it["detail"])))
+    return ('<div style="display:grid;grid-template-columns:1.25fr 1fr 1fr 1fr;gap:0;">%s</div>'
+            '<div style="margin-top:14px;padding-top:13px;border-top:1px solid %s;font-size:14px;color:%s;">%s'
+            '<div style="color:%s;font-size:12.5px;margin-top:3px;">%s</div></div>'
+            % (cells, LINE2, INK, verdict, MUTED, esc(rule)))
+
+
+def score_block(overall: float, weakest_label: str, grade: str) -> str:
+    """单笔页面还在用的小号分数块。"""
+    c = grade_color(overall)
+    return ('<div style="display:flex;align-items:center;gap:16px;margin:2px 0 8px;">'
+            '<div class="m" style="font-size:52px;line-height:0.9;font-weight:700;color:%s;">%d</div>'
+            '<div><div style="font-size:15px;font-weight:700;color:%s;">%s</div>'
+            '<div style="font-size:12.5px;color:%s;">短板: %s</div>'
+            '<div style="font-size:11.5px;color:%s;">总分取各项最低分, 不取平均</div></div></div>'
+            % (c, round(overall), c, esc(grade), SOFT, esc(weakest_label), MUTED))
 
 
 def compare_line(before: float, after: float) -> str:
-    """追问 / 套用方案后: 修改前总分 → 现在总分。"""
     d = round(after) - round(before)
     c = GREEN if d > 0 else (RED if d < 0 else MUTED)
-    return ('<div class="m" style="display:flex;align-items:center;gap:10px;font-size:13px;color:%s;margin:-2px 0 6px;">'
+    return ('<div class="m" style="display:flex;align-items:center;gap:9px;font-size:13px;color:%s;margin:-2px 0 8px;">'
             '<span>修改前</span><span style="color:%s;font-weight:700;">%d</span><span>→ 现在</span>'
             '<span style="color:%s;font-weight:700;">%d</span>'
-            '<span style="background:%s;color:%s;font-weight:700;padding:0 6px;">%+d</span></div>'
-            % (MUTED, grade_color(before), round(before), grade_color(after), round(after), c, BG, d))
+            '<span style="background:%s;color:%s;font-weight:700;padding:0 7px;border-radius:5px;">%+d</span></div>'
+            % (MUTED, grade_color(before), round(before), grade_color(after), round(after),
+               "#e7f6ee" if d > 0 else LINE2, c, d))
 
 
 RULER_SHORT = {"single_day": "单日", "multi_day": "连续5日", "presets": "预设", "weekend": "周末"}
 
 
 def ruler(items: list[dict], end_label: str = "强平") -> str:
-    """强平距离尺: 每个评分项用掉多少强平距离 (= 100 − 分数), 最后 10% 是警示胶带区。
-    end_label: 尺尾写什么 —— 全是现货的账户不会被强平, 尺尾是「本金亏光」。
-    标签用短名 (09-16 截图发现长名在尺上互相重叠); 相邻标记距离 < 30% 时上下错开。"""
+    """强平距离尺: 每个评分项用掉多少强平距离 (= 100 − 分数)。相邻标记靠太近时上下错开。"""
     placed, prev_p, prev_row = [], None, 1
     for it in sorted(items, key=lambda x: 100 - x["score"]):
         p = min(max(100 - it["score"], 0.0), 100.0)
@@ -186,50 +272,61 @@ def ruler(items: list[dict], end_label: str = "强平") -> str:
     marks = ""
     for p, row, it in placed:
         c = grade_color(it["score"])
-        label_top = 0 if row == 0 else 28
+        label_top = 0 if row == 0 else 26
         shift = -92 if p > 85 else (-8 if p < 12 else -50)
-        marks += ('<div style="position:absolute;left:%.1f%%;top:%dpx;height:%dpx;border-left:2px solid %s;"></div>'
-                  '<svg width="12" height="8" style="position:absolute;left:%.1f%%;top:62px;transform:translateX(-5px);"><path d="M0 0 H12 L6 8 Z" fill="%s"></path></svg>'
-                  '<div class="m" style="position:absolute;left:%.1f%%;top:%dpx;transform:translateX(%d%%);font-size:12px;font-weight:700;color:%s;background:%s;padding:1px 7px;white-space:nowrap;">%s %d</div>'
-                  % (p, label_top + 20, 70 - label_top - 20, c, p, c, p, label_top, shift, BG, c, esc(it["label"]), round(it["score"])))
-    return ('<div style="position:relative;height:118px;margin:6px 0 4px;">%s'
-            '<div style="position:absolute;left:0;right:10%%;top:70px;height:14px;background:%s;"></div>'
-            '<div class="rsd-tape-thin" style="position:absolute;left:90%%;right:0;top:70px;height:14px;"></div>'
-            '<div style="position:absolute;left:0;right:0;top:86px;height:8px;background:repeating-linear-gradient(90deg,%s 0 1px,transparent 1px 10%%);"></div>'
-            '<div class="m" style="position:absolute;left:0;top:98px;font-size:10px;color:%s;">开仓</div>'
-            '<div class="m" style="position:absolute;right:0;top:98px;font-size:10px;font-weight:700;color:%s;">%s</div></div>'
-            % (marks, LINE2, STENCIL, MUTED, ORANGE, esc(end_label)))
+        marks += ('<div style="position:absolute;left:%.1f%%;top:%dpx;height:%dpx;border-left:1px solid %s;"></div>'
+                  '<div class="m" style="position:absolute;left:%.1f%%;top:%dpx;transform:translateX(%d%%);font-size:11.5px;'
+                  'font-weight:700;color:%s;background:%s;padding:1px 7px;white-space:nowrap;border:1px solid %s;border-radius:4px;">%s %d</div>'
+                  % (p, label_top + 18, 62 - label_top - 18, c, p, label_top, shift, c, CARD, LINE,
+                     esc(it["label"]), round(it["score"])))
+    return ('<div style="position:relative;height:100px;margin:4px 0;">%s'
+            '<div style="position:absolute;left:0;right:0;top:62px;height:8px;background:%s;border-radius:4px;"></div>'
+            '<div style="position:absolute;left:90%%;right:0;top:62px;height:8px;background:%s;border-radius:0 4px 4px 0;opacity:.85;"></div>'
+            '<div class="m" style="position:absolute;left:0;top:76px;font-size:10px;color:%s;">开仓</div>'
+            '<div class="m" style="position:absolute;right:0;top:76px;font-size:10px;font-weight:700;color:%s;">%s</div></div>'
+            % (marks, LINE2, RED, MUTED, RED, esc(end_label)))
+
+
+def evidence_bar(evidence: list[dict]) -> str:
+    """底部证据条: ✔ 绿 / ! 黄。"""
+    spans = ""
+    for e in evidence:
+        ok = e["status"] == "ok"
+        spans += ('<span style="display:inline-flex;align-items:flex-start;gap:6px;">'
+                  '<span style="color:%s;font-weight:700;">%s</span><span>%s</span></span>'
+                  % (GREEN if ok else AMBER, "✔" if ok else "!", esc(e["text"])))
+    return ('<div style="display:flex;gap:24px;flex-wrap:wrap;font-size:12.5px;color:%s;background:%s;'
+            'border:1px solid %s;border-radius:10px;padding:11px 18px;">%s</div>' % (SOFT, CARD, LINE, spans))
 
 
 def evidence_line(evidence: list[dict]) -> str:
-    spans = "".join('<span><span style="color:%s;">%s</span> %s</span>'
-                    % (GREEN if e["status"] == "ok" else ORANGE, "OK" if e["status"] == "ok" else "WARN", esc(e["text"]))
-                    for e in evidence)
-    return '<div class="m" style="display:flex;gap:8px 16px;flex-wrap:wrap;font-size:12px;color:%s;border-top:1px dashed #3a3831;padding-top:10px;">%s</div>' % (MUTED, spans)
+    return evidence_bar(evidence)
 
 
 def suggestion_card(s: dict) -> str:
     if s.get("score") is None:
-        return ('<div style="background:%s;border:1px solid %s;border-left:2px dashed %s;padding:12px 14px;">'
-                '<div style="font-size:15px;font-weight:600;">%s</div><div style="font-size:12px;color:%s;margin-top:4px;">%s</div></div>'
-                % (BG, LINE, STENCIL, esc(s.get("title", "")), MUTED, esc(s.get("detail", ""))))
+        return ('<div><div style="font-size:13.5px;font-weight:500;color:%s;">%s</div>'
+                '<div style="font-size:12px;color:%s;margin-top:4px;">%s</div></div>'
+                % (INK, esc(s.get("title", "")), MUTED, esc(s.get("detail", ""))))
     before, after = s["score_before"], s["score"]
-    c = grade_color(after)
-    gain = max(after - before, 0)
-    return ('<div style="background:%s;border:1px solid %s;border-left:2px dashed %s;padding:12px 14px;display:flex;flex-direction:column;gap:6px;">'
-            '<div style="font-size:15px;font-weight:600;">%s</div><div class="m" style="font-size:12px;color:%s;">%s</div>'
-            '<div style="display:flex;align-items:center;gap:8px;"><div style="flex-grow:1;height:8px;background:%s;position:relative;">'
-            '<div style="position:absolute;left:0;width:%.0f%%;height:8px;background:%s;"></div>'
-            '<div style="position:absolute;left:%.0f%%;width:%.0f%%;height:8px;background:%s;"></div></div>'
-            '<span class="m" style="font-size:13px;font-weight:700;color:%s;">%d→%d</span></div></div>'
-            % (BG, LINE, STENCIL, esc(s["title"]), MUTED, esc(s["detail"]), LINE2,
-               before, grade_color(before), before, gain, c, c, round(before), round(after)))
+    gain = round(after) - round(before)
+    return ('<div><div style="font-size:13.5px;font-weight:500;color:%s;">%s</div>'
+            '<div style="font-size:12px;color:%s;margin:2px 0 9px;">%s</div>'
+            '<div class="m" style="display:flex;align-items:baseline;gap:8px;font-weight:700;">'
+            '<span style="color:%s;font-size:17px;">%d</span><span style="color:%s;">→</span>'
+            '<span style="color:%s;font-size:23px;">%d</span>'
+            '<span style="background:%s;color:%s;font-size:11px;padding:1px 7px;border-radius:5px;">%+d</span></div></div>'
+            % (INK, esc(s.get("title", "")), MUTED, esc(s.get("detail", "")),
+               grade_color(before), round(before), MUTED, grade_color(after), round(after),
+               "#e7f6ee" if gain > 0 else LINE2, GREEN if gain > 0 else MUTED, gain))
 
 
-# 结论分点: 按小标题关键词给标签上色 (None = 按安全分档位上色)
+# ---------------------------------------------------------------- 分点结论
+# 小标题关键词 -> 色调 (None = 按安全分档位上色)
 _TONES = [(("安全",), None), (("最差", "强平", "连续", "同步", "双重", "亏"), RED),
-          (("注意", "周末", "若用", "BTC", "样本"), ORANGE), (("可以考虑", "建议", "调整", "方案"), GREEN),
+          (("注意", "周末", "若用", "BTC", "样本"), AMBER), (("可以考虑", "建议", "调整", "方案"), GREEN),
           (("历史", "最终", "提醒"), MUTED)]
+_TINT = {RED: "#fdecea", AMBER: "#fdf3e4", GREEN: "#e7f6ee", MUTED: LINE2}
 _TOKEN = re.compile(r"(\d{4}-\d{2}-\d{2}(?:\s?~\s?\d{4}-\d{2}-\d{2})?)"
                     r"|([-+−]?\d[\d,]*(?:\.\d+)?\s?(?:%|倍|分|天|年|次|个交易日|个周末|USDT|个)?)")
 
@@ -237,7 +334,7 @@ _TOKEN = re.compile(r"(\d{4}-\d{2}-\d{2}(?:\s?~\s?\d{4}-\d{2}-\d{2})?)"
 def _tone(title: str, overall: float | None) -> str:
     for keys, color in _TONES:
         if any(k in title for k in keys):
-            return (grade_color(overall) if overall is not None else ORANGE) if color is None else color
+            return (grade_color(overall) if overall is not None else AMBER) if color is None else color
     return MUTED
 
 
@@ -246,16 +343,16 @@ def _highlight(text: str) -> str:
         if m.group(1):
             return '<span class="m" style="color:%s;">%s</span>' % (SOFT, m.group(1))
         tok = m.group(2)
-        color = RED if tok.startswith(("-", "−")) else TEXT
-        return '<span class="m" style="color:%s;background:%s;padding:0 4px;font-weight:700;">%s</span>' % (color, LINE2, tok)
+        color = RED if tok.startswith(("-", "−")) else INK
+        return '<span class="m" style="color:%s;font-weight:700;">%s</span>' % (color, tok)
     return _TOKEN.sub(rep, esc(text))
 
 
 def bullets(md: str, overall: float | None = None) -> str:
     """
     把 Markdown 分点结论 (模板或大模型写的) 渲染成: 彩色标签 + 数字高亮。解析不了的行照常显示。
-    子条目 (缩进行) 必须画进它所属那条的正文格里 —— 早先是单独一行、左边距写死 106px,
-    结果「可以考虑」那行正文空着, 两条建议悬在它和「提醒」之间, 看起来像掉到下一条去了 (09-16 Ivan 截图)。
+    子条目 (缩进行) 必须画进它所属那条的正文格里 —— 早先是单独一行、左边距写死,
+    结果「可以考虑」那行正文空着, 建议悬在它和「提醒」之间, 看起来像掉到下一条去了。
     """
     blocks: list[dict] = []
     for raw in md.splitlines():
@@ -273,77 +370,64 @@ def bullets(md: str, overall: float | None = None) -> str:
     for b in blocks:
         title = b["title"] or ("提醒" if re.search(r"历史|最终|决定", b["body"]) else "要点")
         tone = _tone(title, overall)
-        body = '<div style="font-size:14px;line-height:1.75;color:%s;">%s</div>' % (SOFT, _highlight(b["body"])) \
+        body = '<div style="font-size:13.5px;line-height:1.75;color:%s;">%s</div>' % (SOFT, _highlight(b["body"])) \
             if b["body"].strip() else ""
         for sub in b["subs"]:
-            body += ('<div style="display:flex;gap:10px;padding:3px 0;">'
-                     '<svg width="8" height="8" style="flex:0 0 auto;margin-top:8px;"><rect width="8" height="8" fill="%s"></rect></svg>'
-                     '<div style="font-size:14px;line-height:1.7;color:%s;">%s</div></div>' % (GREEN, SOFT, _highlight(sub)))
-        rows += ('<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px dashed %s;">'
-                 '<span style="flex:0 0 auto;min-width:94px;text-align:center;background:%s;color:%s;font-weight:700;font-size:12px;padding:3px 8px;letter-spacing:0.04em;">%s</span>'
+            body += ('<div style="display:flex;gap:9px;padding:3px 0;">'
+                     '<span style="flex:0 0 auto;margin-top:8px;width:6px;height:6px;border-radius:50%%;background:%s;"></span>'
+                     '<div style="font-size:13.5px;line-height:1.7;color:%s;">%s</div></div>' % (GREEN, SOFT, _highlight(sub)))
+        rows += ('<div style="display:flex;gap:12px;align-items:flex-start;padding:7px 0;border-bottom:1px solid %s;">'
+                 '<span style="flex:0 0 auto;min-width:78px;text-align:center;background:%s;color:%s;font-weight:500;'
+                 'font-size:11px;padding:2px 8px;border-radius:5px;">%s</span>'
                  '<div style="flex:1 1 auto;min-width:0;">%s</div></div>'
-                 % (LINE, tone, BG, esc(title), body))
-    return '<div style="border-top:2px solid %s;margin:6px 0 4px;">%s</div>' % (LINE, rows)
+                 % (LINE2, _TINT.get(tone, LINE2), tone, esc(title), body))
+    return '<div style="margin:6px 0 2px;">%s</div>' % rows
 
 
-def account_overview(items: list[tuple[str, float, str]], collateral: list[tuple[str, float, str]],
-                     eff_lev: float | None, equity: float, pnl: float, gross: float) -> str:
-    """持仓面板右侧的「账户全貌」: 仓位构成 / 保证金构成 / 有效杠杆 / 未实现盈亏。"""
-    def bar(parts):
-        total = sum(v for _, v, _ in parts) or 1.0
-        segs = "".join('<div style="width:%.2f%%;background:%s;"></div>' % (100 * v / total, c) for _, v, c in parts)
-        legend = " · ".join("%s %.0f%%" % (esc(n), 100 * v / total) for n, v, _ in parts)
-        return ('<div style="display:flex;height:20px;margin-top:6px;">%s</div>'
-                '<div class="m" style="font-size:11px;color:%s;margin-top:5px;line-height:1.7;">%s</div>' % (segs, MUTED, legend))
+# ---------------------------------------------------------------- 持仓汇总
+def summary_line(pairs: list[tuple[str, str]]) -> str:
+    """表格下面那一行: 保证金 / 权益 / 总仓位 / 有效杠杆 / 未实现盈亏。"""
+    cells = "".join('<span style="color:%s;">%s <b class="m" style="color:%s;font-size:13.5px;font-weight:700;">%s</b></span>'
+                    % (MUTED, esc(k), INK, esc(v)) for k, v in pairs)
+    return ('<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:10px;padding-top:11px;'
+            'border-top:1px solid %s;font-size:12.5px;">%s</div>' % (LINE2, cells))
 
-    lev_html = ""
-    if eff_lev is not None:
-        lev_html = ('<div><div style="font-size:11px;color:%s;">有效杠杆</div>'
-                    '<div class="m" style="font-size:28px;font-weight:700;line-height:1.1;">%.2f×</div>'
-                    '<div style="height:8px;background:%s;margin-top:6px;position:relative;">'
-                    '<div style="width:%.0f%%;height:8px;background:%s;"></div>'
-                    '<div style="position:absolute;left:50%%;top:-3px;height:14px;border-left:1px dashed %s;"></div></div>'
-                    '<div style="font-size:11px;color:%s;margin-top:4px;">名义 ÷ 权益; 虚线 = 5 倍</div></div>'
-                    % (MUTED, eff_lev, LINE2, min(100.0, 100 * eff_lev / 10), ORANGE, STENCIL, MUTED))
-    pc = GREEN if pnl > 0 else (RED if pnl < 0 else MUTED)
-    pnl_txt = "%s%s USDT" % ("+" if pnl > 0 else ("−" if pnl < 0 else ""), format(round(abs(pnl)), ","))
-    return ('<div style="display:flex;flex-direction:column;gap:16px;">'
-            '<div style="font-size:13px;font-weight:700;letter-spacing:0.06em;color:%s;">账户全貌</div>'
-            '<div><div style="font-size:11px;color:%s;">仓位构成 (名义 %s)</div>%s</div>'
-            '<div><div style="font-size:11px;color:%s;">保证金构成 (权益 %s)</div>%s</div>%s'
-            '<div style="border-top:1px dashed #3a3831;padding-top:12px;">'
-            '<div style="font-size:11px;color:%s;">未实现盈亏</div>'
-            '<div class="m" style="font-size:22px;font-weight:700;color:%s;">%s</div>'
-            '<div style="font-size:11px;color:%s;">填了买入价的仓位才算; 当前价来自 Yahoo</div></div></div>'
-            % (SOFT, MUTED, format(round(gross), ","), bar(items) if items else "",
-               MUTED, format(round(equity), ","), bar(collateral) if collateral else "", lev_html,
-               MUTED, pc, pnl_txt, MUTED))
+
+def mix_bar(items: list[tuple[str, float, str]], total: float) -> str:
+    """仓位构成 / 保证金构成的细条 (侧栏与持仓卡用)。"""
+    if total <= 0:
+        return ""
+    seg = "".join('<span style="width:%.1f%%;background:%s;"></span>' % (100 * v / total, c) for _, v, c in items)
+    txt = " · ".join('<span style="color:%s;">%s %.0f%%</span>' % (MUTED, esc(n), 100 * v / total) for n, v, c in items)
+    return ('<div style="display:flex;height:7px;border-radius:4px;overflow:hidden;background:%s;">%s</div>'
+            '<div class="m" style="font-size:11px;margin-top:5px;">%s</div>' % (LINE2, seg, txt))
 
 
 def metric_card(m: dict) -> str:
     """雷达里的一个指标卡: 状态点 + 标签 + 数值 (多来源时同时列出) + 说明。"""
-    ok = m["status"] == "ok"
-    color = GREEN if ok else ORANGE
-    note = ('<div style="font-size:11px;color:%s;line-height:1.5;">%s</div>' % (STENCIL, esc(m["note"]))) if m.get("note") else ""
-    return ('<div style="border:1px solid %s;background:%s;padding:12px 14px;display:flex;flex-direction:column;gap:6px;height:100%%;">'
-            '<div style="display:flex;align-items:center;gap:8px;"><svg width="8" height="8"><rect width="8" height="8" fill="%s"></rect></svg>'
-            '<span style="font-size:13px;color:%s;">%s</span></div>'
-            '<div style="font-size:14px;line-height:1.6;color:%s;">%s</div>%s</div>'
-            % (LINE, BG, color, MUTED, esc(m["label"]), TEXT, _highlight(m["display"]), note))
+    ok = m.get("ok", True)
+    vals = m.get("values") or ([m.get("display")] if m.get("display") else [])
+    body = "".join('<div class="m" style="font-size:%dpx;font-weight:700;color:%s;line-height:1.45;">%s</div>'
+                   % ((22 if len(str(v)) <= 22 else 15) if i == 0 else 13, INK if i == 0 else SOFT, esc(v))
+                   for i, v in enumerate(vals))
+    return ('<div style="display:flex;flex-direction:column;gap:3px;">'
+            '<div style="display:flex;align-items:center;gap:7px;font-size:12px;color:%s;">'
+            '<span style="width:6px;height:6px;border-radius:50%%;background:%s;"></span>%s</div>%s'
+            '<div style="font-size:11.5px;color:%s;">%s</div></div>'
+            % (MUTED, GREEN if ok else AMBER, esc(m.get("label", "")), body, MUTED, esc(m.get("note", ""))))
 
 
 def earnings_table(rows: list[dict]) -> str:
-    """下次财报日: 越近越红; 推算出来的明确标注。"""
     body = ""
     for r in rows:
         days = r.get("days")
-        color = MUTED if days is None else (RED if days <= 7 else (ORANGE if days <= 21 else GREEN))
         when = "—" if not r.get("date") else "%s · %d 天后" % (r["date"], days)
-        tag = ('<span style="background:%s;color:%s;font-size:11px;font-weight:700;padding:1px 6px;">估算</span>' % (ORANGE, BG)) \
-            if r.get("estimated") and r.get("date") else ""
+        color = RED if (days is not None and days <= 7) else (AMBER if (days is not None and days <= 21) else TEXT)
+        tag = ('<span style="background:%s;color:%s;font-size:11px;padding:1px 6px;border-radius:4px;">估算</span>' % ("#fdf3e4", "#a2650f")) \
+            if r.get("estimated") else ""
         body += ('<tr><td class="m">%s</td><td class="m" style="color:%s;">%s</td><td>%s %s</td></tr>'
-                 % (esc(r["symbol"]), color, esc(when), esc(r["source"]), tag))
-    return ('<table class="rsd-table"><tr><th>标的</th><th>下次财报</th><th>来源</th></tr>%s</table>' % body)
+                 % (esc(r.get("symbol", "")), color, esc(when), esc(r.get("source", "")), tag))
+    return '<table class="rsd-table"><tr><th>标的</th><th>下次财报</th><th>来源</th></tr>%s</table>' % body
 
 
 def worst_table(rows: list[dict], k: int = 5) -> str:
@@ -351,9 +435,9 @@ def worst_table(rows: list[dict], k: int = 5) -> str:
     body = ""
     for i, r in enumerate(rows[:k]):
         first = i == 0
-        body += ('<tr%s><td class="m"%s>%s</td><td class="m" style="text-align:right;color:%s;%s">−%.1f%%</td>'
+        body += ('<tr%s><td class="m">%s</td><td class="m" style="text-align:right;color:%s;%s">−%.1f%%</td>'
                  '<td class="m" style="text-align:right;">%s</td>%s<td class="m">%s</td><td>%s</td></tr>'
-                 % (' style="background:#221a12;"' if first else "", ' style="border-left:3px solid %s;"' % RED if first else "",
+                 % (' style="background:#fdf7f5;"' if first else "",
                     esc(r["日期"]), RED, "font-weight:700;" if first else "", r["账户亏损 %"], esc(r["BTC 当日最低"]),
                     '<td class="m" style="text-align:right;">%s</td>' % esc(r["ETH 当日最低"]) if has_eth else "",
                     esc(str(r["最拖累"]).split(" ")[0]), "是" if r["强平"] else "否"))

@@ -1,9 +1,11 @@
 [theme]
-base = "dark"
-primaryColor = "#f08a24"
-backgroundColor = "#121210"
-secondaryBackgroundColor = "#1a1a17"
-textColor = "#ece7dc"
+# 白底模板 (2026-09-17 定稿): 浅色底 + 黑色主按钮 + 细边框卡片。
+# 原生组件 (表格 / 输入框 / 滑块) 跟随这里的 base, 只靠 CSS 盖不住, 所以主题必须在这里切。
+base = "light"
+primaryColor = "#16181d"
+backgroundColor = "#f6f7f8"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#2c2f36"
 
 [client]
 toolbarMode = "minimal"

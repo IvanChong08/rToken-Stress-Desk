@@ -68,7 +68,7 @@ PF_EXAMPLES = [
 ]
 PF_FOLLOWUPS = ["把 MSTR 砍半呢", "BTC 全部换成 USDT 呢", "halve MSTR"]
 
-st.set_page_config(page_title="rToken Stress Desk", page_icon="🧯", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="rToken Stress Desk", page_icon="🧯", layout="wide", initial_sidebar_state="expanded")
 st.markdown(ui.CSS, unsafe_allow_html=True)
 
 
@@ -164,155 +164,173 @@ def mm_haircut() -> tuple[float, float]:
     return st.session_state.get("mm_pct", 1.0) / 100, st.session_state.get("haircut_pct", 95) / 100
 
 
-def header_status(check_skill: bool) -> tuple[list, str]:
-    """顶栏状态。check_skill=False 时不做 Skill 网络检测 (可能要等几秒), 先显示「检测中」。"""
+def sidebar_status(check_skill: bool) -> list[tuple]:
+    """侧栏的运行状态行 (ok, 名称, 右侧说明)。check_skill=False 时跳过 Skill 网络检测, 先显示「检测中」。"""
     last = st.session_state.get("pf_report")
-    if last is None:
-        yahoo = (None, "YAHOO")
-    else:
-        yahoo = (all(p.get("ok") for p in last.provenance if p.get("source") == "yahoo"), "YAHOO")
+    yahoo_ok = None if last is None else all(p.get("ok") for p in last.provenance if p.get("source") == "yahoo")
     asof = rtoken_cache_asof()
-    skill = (skill_in_use_ok(), "SKILL ATR") if check_skill else ("pending", "SKILL ATR 检测中")   # 黄色闪烁
-    provider = llm.available_provider()
-    left = budget.remaining()
-    items = [yahoo, (bool(asof), "RTOKEN %s" % asof if asof else "RTOKEN 缓存读取失败"), skill,
-             (True if (provider and left) else (False if provider else None),
-              ("%s 今日剩 %d 次" % (provider.upper(), left)) if provider else "未配置大模型")]
-    log_text = "日志 暂无记录"
+    skill = (skill_in_use_ok(), "可用" if skill_in_use_ok() else "对方服务器故障") if check_skill else ("pending", "检测中")
+    provider, left = llm.available_provider(), budget.remaining()
+    log_ok, log_text = None, "暂无记录"
     if os.path.exists(LOG_PATH):
         ok, n = verify_log(LOG_PATH)
-        with open(LOG_PATH, encoding="utf-8") as f:
-            lines = [ln for ln in f if ln.strip()]
-        last_hash = json.loads(lines[-1])["hash"][:12] if lines else ""
-        log_text = "日志 %d · %s #%s" % (n, "链完整" if ok else "链损坏", last_hash)
-    return items, log_text
+        log_ok, log_text = ok, "%d 条 · %s" % (n, "链完整" if ok else "链损坏")
+    return [
+        (yahoo_ok, "美股 / BTC 行情", "Yahoo"),
+        (bool(asof), "rToken 行情", ("截至 %s" % asof) if asof else "缓存读取失败"),
+        (skill[0], "Bitget Skill", skill[1]),
+        (True if (provider and left) else (False if provider else None), "大模型",
+         ("%s 剩 %d 次" % (provider.upper(), left)) if provider else "未配置"),
+        (log_ok, "调用日志", log_text),
+    ]
 
 
-header_slot = st.empty()
-html(ui.header(*header_status(check_skill=False)), header_slot)   # 先立刻画出顶栏, 页面最后再更新
-tab_pf, tab_trade, tab_radar = st.tabs(["组合", "单笔", "雷达"])
+# ---------------------------------------------------------------- 侧栏 (假设参数 + 运行状态)
+with st.sidebar:
+    html(ui.brand())
+    html(ui.side_head("假设参数"))
+    st.slider("维持保证金率 %", 0.5, 5.0, 1.0, 0.5, key="mm_pct",
+              help="账户权益低于「名义仓位 × 这个比例」就被强平。你设定的假设值, 不是 Bitget 官方数值。")
+    st.slider("BTC / ETH 折算率 %", 50, 100, 95, 5, key="haircut_pct",
+              help="BTC、ETH 作保证金时按多少比例计入权益 (两者共用一个值, 这是简化)。你设定的假设值, 不是 Bitget 官方数值。")
+    html(ui.assume_note("两项都是你设定的假设值, 不是 Bitget 官方数值。改动后要重新运行。"))
+    html(ui.side_head("运行状态"))
+    status_slot = st.empty()
+    html(ui.status_rows(sidebar_status(check_skill=False)), status_slot)
+    st.caption("支持 %s 只 rToken · 其中 %s 只能加杠杆" % (format(len(universe.SUPPORTED), ","), len(universe.LEVERAGE)))
+
+tab_pf, tab_trade, tab_radar = st.tabs(["组合压力测试", "单笔想法", "市场雷达"])
 
 # ================================================================ 组合
 with tab_pf:
     if "pf_account" not in st.session_state:
         st.session_state["pf_account"] = pidea.parse_rules(PF_EXAMPLES[0])
         st.session_state["pf_ver"] = 0
+    # 空状态卡片的「用示例试一下」: 上一轮挂的待办, 在这里 (渲染开始前) 执行
+    if st.session_state.pop("pf_pending_run", False):
+        st.session_state["pf_account"] = pidea.parse_rules(PF_EXAMPLES[0])
+        st.session_state["pf_ver"] += 1
+        st.session_state["pf_how"] = "由规则解析为新组合 (示例)"
+        _log = get_log()
+        _a = st.session_state["pf_account"]
+        with st.spinner("取 5 年行情并重演中..."):
+            _panel = get_panel(tuple(sorted({p.symbol for p in _a.positions})), _log)
+            st.session_state["pf_report"] = pcard.build_report(_a, _panel, log=_log, use_llm=False)
+
     acc: pf.Account = st.session_state["pf_account"]
+    rep_before = st.session_state.get("pf_report")
 
-    chips = st.columns(len(PF_EXAMPLES) + len(PF_FOLLOWUPS))
-    for i, ex in enumerate(PF_EXAMPLES):
-        if chips[i].button("示例 %d" % (i + 1), help=ex, width="stretch", key="pf_ex_%d" % i):
-            st.session_state["pf_query"] = ex
-    for j, q in enumerate(PF_FOLLOWUPS):
-        if chips[len(PF_EXAMPLES) + j].button(q, width="stretch", key="pf_fu_%d" % j):
-            st.session_state["pf_query"] = q
-    c_in, c_btn = st.columns([8, 1], vertical_alignment="bottom")
-    pq = c_in.text_input("用一句话描述持仓, 或者追问修改", key="pf_query", placeholder=PF_EXAMPLES[0],
-                         label_visibility="collapsed")
+    # 新手引导: 没跑过、也没手动关掉时才显示
+    if rep_before is None and not st.session_state.get("guide_off"):
+        with st.container(key="guide"):
+            g_left, g_right = st.columns([13, 2], vertical_alignment="center")
+            with g_left:
+                html(ui.guide_strip())
+            if g_right.button("收起", key="guide_dismiss", width="stretch"):
+                st.session_state["guide_off"] = True
+
     run_now = False
-    if c_btn.button("解析 / 修改", key="pf_parse", width="stretch") and pq.strip():
-        log = get_log()
-        mm0, hc0 = mm_haircut()
-        panel_for_price = get_panel(tuple(sorted({p.symbol for p in acc.positions})), log)
-        new, how = pidea.edit(pq, acc, panel_for_price.btc_price, panel_for_price.eth_price)       # 规则优先 (快)
-        if new is None:
-            with st.spinner("大模型理解中..."):
-                new, provs, how = pidea.understand(pq, acc, panel_for_price.btc_price, mm0, hc0,
-                                                   panel_for_price.eth_price, budget_check=budget.take)
-            for p in provs:
-                log.append(p)
+    with st.container(key="card_hold"):
+        html(ui.card_head("你的持仓", "一句话描述, 或直接改下面的表格 · 中英文都行"))
+        c_in, c_btn = st.columns([8, 2], vertical_alignment="bottom")
+        pq = c_in.text_input("用一句话描述持仓, 或者追问修改", key="pf_query", placeholder=PF_EXAMPLES[0],
+                             label_visibility="collapsed")
+        go = c_btn.button("运行压力测试", type="primary", key="pf_run", width="stretch")
+
+        chips = st.columns(len(PF_EXAMPLES) + len(PF_FOLLOWUPS))
+        for i, ex in enumerate(PF_EXAMPLES):
+            if chips[i].button("示例 %d" % (i + 1), help=ex, width="stretch", key="pf_ex_%d" % i):
+                st.session_state["pf_query"] = ex
+        for j, q in enumerate(PF_FOLLOWUPS):
+            if chips[len(PF_EXAMPLES) + j].button(q, width="stretch", key="pf_fu_%d" % j):
+                st.session_state["pf_query"] = q
+
+        # 一句话有内容、且和上次解析过的不一样时才解析, 再用解析后的组合去跑 (两步合成一个按钮)。
+        # 必须比对「上次解析过的那句」: 否则输入框里残留的旧句子会在每次点运行时把你手改的表格冲掉。
+        if go and pq.strip() and pq.strip() != st.session_state.get("pf_parsed_text"):
+            st.session_state["pf_parsed_text"] = pq.strip()
+            log = get_log()
+            mm0, hc0 = mm_haircut()
+            panel_for_price = get_panel(tuple(sorted({p.symbol for p in acc.positions})), log)
+            new, how = pidea.edit(pq, acc, panel_for_price.btc_price, panel_for_price.eth_price)   # 规则优先 (快)
+            if new is None:
+                with st.spinner("大模型理解中..."):
+                    new, provs, how = pidea.understand(pq, acc, panel_for_price.btc_price, mm0, hc0,
+                                                       panel_for_price.eth_price, budget_check=budget.take)
+                for p in provs:
+                    log.append(p)
+            else:
+                how = "追问修改: " + how
+            if new is None:
+                st.error(how)
+            else:
+                st.session_state["pf_prev_score"] = rep_before.scorecard["overall"] if rep_before is not None else None
+                st.session_state["pf_account"] = acc = new
+                st.session_state["pf_ver"] += 1
+                st.session_state["pf_how"] = how
+                run_now = True
+        if st.session_state.get("pf_how"):
+            st.caption("解析: " + st.session_state["pf_how"])
+
+        ver = st.session_state["pf_ver"]
+        auto = st.checkbox("用 数量 × 当前价 自动算名义价值", value=True, key="pf_auto")
+        prices = get_prices(tuple(sorted({p.symbol for p in acc.positions})))
+        df = pd.DataFrame(holdings.position_rows(acc.positions, prices))
+        edited = st.data_editor(
+            df, num_rows="dynamic", width="stretch", key="pf_editor_%d" % ver, hide_index=True,
+            column_config={
+                "标的": st.column_config.SelectboxColumn(options=sorted(SUPPORTED), required=True, width="small"),
+                "类型": st.column_config.SelectboxColumn(options=["杠杆", "现货"], required=True, width="small"),
+                "方向": st.column_config.SelectboxColumn(options=["做多", "做空"], required=True, width="small"),
+                "买入价": st.column_config.TextColumn(width="small", help="留空 = 当作刚开仓 (浮盈浮亏按 0 算)"),
+                # 代币化美股本来就是买零碎份额用的: Bitget 数量精度 4 位 = 最小 0.0001 股。
+                "数量": st.column_config.NumberColumn(min_value=0.0, step=0.0001, format="%g",
+                                                     help="可以填小数, 最小 0.0001 股 (Bitget 数量精度 4 位)"),
+                "名义 USDT": st.column_config.NumberColumn(min_value=0.0, format="%.2f", disabled=auto,
+                                                         help="勾了自动算时由 数量 × 当前价 得出; Bitget 单笔最小 10 USDT"),
+            })
+        u1, u2, u3 = st.columns(3)
+        usdt = u1.number_input("USDT 保证金", min_value=0.0, value=float(acc.usdt), step=500.0, key="pf_usdt_%d" % ver)
+        btc = u2.number_input("BTC (个)", min_value=0.0, value=float(acc.btc), step=0.01, format="%.4f",
+                              key="pf_btc_%d" % ver)
+        eth = u3.number_input("ETH (个)", min_value=0.0, value=float(acc.eth), step=0.1, format="%.3f",
+                              key="pf_eth_%d" % ver)
+        mm, haircut = mm_haircut()
+
+        rows = edited.to_dict("records")
+        # 手动加的行要补取当前价: prices 只覆盖了进来时就有的持仓, 新打的标的取不到价,
+        # 名义价值算不出来, 那一行连同你填的买入价数量都会被丢掉 (09-17 Ivan 实测)
+        new_syms = tuple(sorted({str(r.get("标的") or "").strip().upper() for r in rows} & SUPPORTED - set(prices)))
+        if new_syms:
+            prices = {**prices, **get_prices(new_syms)}
+        positions, skipped = holdings.parse_rows(rows, prices, auto, SUPPORTED)
+        for sk in skipped:
+            st.warning("这一行没有计入: " + sk)
+        cur = pf.Account(positions, usdt, btc, mm, haircut, eth, haircut)
+        err = pf.validate_account(cur)
+        if err:
+            st.warning(err)
         else:
-            how = "追问修改: " + how
-        if new is None:
-            st.error(how)
-        else:
-            prev = st.session_state.get("pf_report")        # 记下修改前的总分, 新结果旁边显示对比
-            st.session_state["pf_prev_score"] = prev.scorecard["overall"] if prev is not None else None
-            st.session_state["pf_account"] = acc = new
-            st.session_state["pf_ver"] += 1
-            st.session_state["pf_how"] = how
-            run_now = True
-    if st.session_state.get("pf_how"):
-        st.caption("解析: " + st.session_state["pf_how"])
-
-    seismo_box = st.container(key="panel_00")          # 内容在算完报告后再填
-
-    with st.container(key="panel_01"):
-        html(ui.panel_title("01", "持仓", "%d 只 rToken 可选 (%d 只能加杠杆); 买入价留空 = 当作刚开仓"
-                            % (len(universe.SUPPORTED), len(universe.LEVERAGE))))
-        h_left, h_right = st.columns([7, 3], gap="medium")
-        with h_left:
-            ver = st.session_state["pf_ver"]
-            auto = st.checkbox("用 买价 × 数量 自动算名义价值 (取当前价)", value=True, key="pf_auto")
-            prices = get_prices(tuple(sorted({p.symbol for p in acc.positions})))
-            df = pd.DataFrame(holdings.position_rows(acc.positions, prices))
-            edited = st.data_editor(
-                df, num_rows="dynamic", width="stretch", key="pf_editor_%d" % ver, hide_index=True,
-                column_config={
-                    "标的": st.column_config.SelectboxColumn(options=sorted(SUPPORTED), required=True, width="small"),
-                    "类型": st.column_config.SelectboxColumn(options=["杠杆", "现货"], required=True, width="small"),
-                    "方向": st.column_config.SelectboxColumn(options=["做多", "做空"], required=True, width="small"),
-                    "买入价": st.column_config.TextColumn(width="small", help="留空 = 当作刚开仓 (浮盈浮亏按 0 算)"),
-                    # 代币化美股本来就是买零碎份额用的: Bitget 数量精度 4 位 = 最小 0.0001 股。
-                    # step 给 1 会把 0.2、0.005 这种直接卡掉 (买不起整股正是 rToken 的意义)。
-                    "数量": st.column_config.NumberColumn(min_value=0.0, step=0.0001, format="%g",
-                                                         help="可以填小数, 最小 0.0001 股 (Bitget 数量精度 4 位)"),
-                    "名义 USDT": st.column_config.NumberColumn(min_value=0.0, format="%.2f", disabled=auto,
-                                                             help="勾了自动算时由 数量 × 当前价 得出; Bitget 单笔最小 10 USDT"),
-                })
-            u1, u2, u3 = st.columns(3)
-            usdt = u1.number_input("USDT 保证金", min_value=0.0, value=float(acc.usdt), step=500.0, key="pf_usdt_%d" % ver)
-            btc = u2.number_input("BTC (个)", min_value=0.0, value=float(acc.btc), step=0.01, format="%.4f",
-                                  key="pf_btc_%d" % ver)
-            eth = u3.number_input("ETH (个)", min_value=0.0, value=float(acc.eth), step=0.1, format="%.3f",
-                                  key="pf_eth_%d" % ver)
-            s1, s2 = st.columns(2)
-            s1.slider("维持保证金率 %", 0.5, 5.0, 1.0, 0.5, key="mm_pct", help="你设定的假设值, 不是 Bitget 官方数值。越高越早触及强平。")
-            s2.slider("BTC/ETH 折算率 %", 50, 100, 95, 5, key="haircut_pct",
-                      help="BTC、ETH 作保证金时按多少比例计入权益 (两者用同一个值, 这是简化)。你设定的假设值, 不是 Bitget 官方数值。")
-            mm, haircut = mm_haircut()
-
-            rows = edited.to_dict("records")
-            # 手动加的行要补取当前价: prices 只覆盖了进来时就有的持仓, 新打的标的取不到价,
-            # 名义价值算不出来, 那一行连同你填的买入价数量都会被丢掉 (09-17 Ivan 实测)
-            new_syms = tuple(sorted({str(r.get("标的") or "").strip().upper() for r in rows} & SUPPORTED - set(prices)))
-            if new_syms:
-                prices = {**prices, **get_prices(new_syms)}
-            positions, skipped = holdings.parse_rows(rows, prices, auto, SUPPORTED)
-            for s in skipped:
-                st.warning("这一行没有计入: " + s)
-            cur = pf.Account(positions, usdt, btc, mm, haircut, eth, haircut)
-            err = pf.validate_account(cur)
-            if err:
-                st.warning(err)
-            clicked = st.button("运行组合压力测试", type="primary", key="pf_run", width="stretch")
-
-        with h_right:
-            if not err:
-                pxs = get_crypto_prices()
-                coll = [(n, v, c) for n, v, c in (
-                    ("USDT", cur.usdt, ui.TEXT),
-                    ("BTC", cur.btc * pxs.get("BTC", 0) * cur.btc_haircut, ui.ORANGE),
-                    ("ETH", cur.eth * pxs.get("ETH", 0) * cur.eth_haircut, "#7fb0e0"),
-                    ("现货", pf.spot_value(cur), "#7fd67a")) if v > 0]
-                shades = ["#ece7dc", "#b9b2a2", "#8a8474", "#5f5a4e"]     # 多头用同色系不同深浅, 条形图才分得出来
-                items, k = [], 0
-                for p in cur.positions:
-                    if p.kind == "spot":
-                        c = "#7fb0e0"
-                    elif p.side == "short":
-                        c = ui.ORANGE
-                    else:
-                        c = shades[k % len(shades)]; k += 1
-                    items.append((p.symbol, p.notional, c))
-                equity = pf.equity0(cur, pxs.get("BTC", 0), pxs.get("ETH", 0))
-                gross = pf.gross_notional(cur)
-                html(ui.account_overview(items, coll, (gross / equity) if equity > 0 else None,
-                                         equity, pf.unrealized_pnl(cur), gross))
+            pxs = get_crypto_prices()
+            equity = pf.equity0(cur, pxs.get("BTC", 0), pxs.get("ETH", 0))
+            gross = pf.gross_notional(cur)
+            upnl = pf.unrealized_pnl(cur)
+            coll = "%s USDT" % format(round(cur.usdt), ",")
+            if cur.btc:
+                coll += " + %.4g BTC" % cur.btc
+            if cur.eth:
+                coll += " + %.4g ETH" % cur.eth
+            html(ui.summary_line([
+                ("保证金", coll),
+                ("账户权益", format(round(equity), ",")),
+                ("总仓位", format(round(gross), ",")),
+                ("有效杠杆", ("%.2f×" % (gross / equity)) if equity > 0 else "—"),
+                ("未实现盈亏", "%s%s" % ("+" if upnl > 0 else ("−" if upnl < 0 else ""), format(round(abs(upnl)), ","))),
+            ]))
 
     # ?demo=1: 打开页面就自动跑一次示例组合 (给评委 / 录屏用); 只在本会话还没有报告时触发
     demo_autorun = st.query_params.get("demo") == "1" and "pf_report" not in st.session_state
-    if (clicked or run_now or demo_autorun) and not err:
+    if (go or run_now or demo_autorun) and not err:
         log = get_log()
         with st.spinner("取 5 年行情并重演中..."):
             panel = get_panel(tuple(sorted({p.symbol for p in cur.positions})), log)
@@ -320,97 +338,121 @@ with tab_pf:
             st.session_state["pf_report"] = pcard.build_report(cur, panel, log=log, use_llm=False)
     rep = st.session_state.get("pf_report")
 
-    with seismo_box:
-        if rep is None:
-            html(ui.panel_title("00", "把这个组合放回过去 5 年的每一天"))
-            st.caption("点「运行组合压力测试」后显示: 每个交易日的账户亏损, 以及强平线在哪里。")
-        else:
-            html(ui.panel_title("00", "把这个组合放回过去 5 年的每一天",
-                                "%s → %s · %d 个交易日 · 每根线 = 当天账户亏损 (各资产最差价同时出现)"
-                                % (rep.daily_dates[0], rep.daily_dates[-1], len(rep.daily_dates))))
-            html(ui.seismograph(rep.daily_dates, rep.daily_loss, rep.liq_loss))
+    # ---- 还没有结果: 用「你想做什么」代替空图表 ----
+    if rep is None:
+        with st.container(key="card_empty"):
+            html(ui.card_head("你想做什么?", "三种用法, 选一个开始"))
+            e1, e2, e3 = st.columns(3, gap="medium")
+            with e1:
+                with st.container(key="ecard_1"):
+                    html(ui.empty_card("◧", "我有一个组合", "多只 rToken + 保证金, 想知道什么行情会让我爆仓"))
+                    if st.button("用示例试一下", key="empty_demo", type="primary", width="stretch"):
+                        st.session_state["pf_query"] = PF_EXAMPLES[0]
+                        st.session_state["pf_pending_run"] = True
+            with e2:
+                with st.container(key="ecard_2"):
+                    html(ui.empty_card("◈", "我只想测一笔", "「3 倍做多 NVDA 过周末」会怎样 —— 周末重锚跳空 + 5 年隔夜尾部"))
+                    st.caption("↑ 点上面的「单笔想法」标签")
+            with e3:
+                with st.container(key="ecard_3"):
+                    html(ui.empty_card("◎", "先看市场温度", "VIX、BTC 波动率、恐惧贪婪、你持仓标的的下次财报日"))
+                    st.caption("↑ 点上面的「市场雷达」标签")
 
-    c2, c3 = st.columns([5, 3], gap="medium")
-    with c2:
-        with st.container(key="panel_02"):
-            # 全是现货的账户不会被强平, 尺子量的是亏掉多少本金
-            pf_spot_only = rep is not None and bool(rep.account["positions"]) and all(
-                p.get("kind") == "spot" for p in rep.account["positions"])
-            html(ui.panel_title("02", "亏损尺" if pf_spot_only else "强平距离尺",
-                                "每个情景亏掉多少本金" if pf_spot_only else "每个情景用掉多少"))
-            if rep is None:
-                st.caption("运行后显示安全总分。")
-            else:
-                sc = rep.scorecard
-                html(ui.score_block(sc["overall"], sc["weakest_label"], score.grade(sc["overall"])))
-                if st.session_state.get("pf_prev_score") is not None:
-                    html(ui.compare_line(st.session_state["pf_prev_score"], sc["overall"]))
-                html(ui.ruler(sc["items"], "本金亏光" if pf_spot_only else "强平"))
-                html(ui.evidence_line(sc["evidence"]))
-                st.write("")
-                html(ui.bullets(rep.narrative, sc["overall"]))
-                st.caption("结论生成方式: %s · 规则: %s" % (rep.narrative_by, sc["rule"]))
+    if rep is not None:
+        sc = rep.scorecard
+        # 全是现货的账户不会被强平, 尺子量的是亏掉多少本金
+        pf_spot_only = bool(rep.account["positions"]) and all(p.get("kind") == "spot" for p in rep.account["positions"])
+        worst_loss = max([100 * max(rep.daily_loss)] + [r["账户亏损 %"] for r in rep.multi_days[:1]])
+        liq_hit = any(i["liquidated"] for i in sc["items"])
+        if pf_spot_only:
+            tail = "现货不会被强平, 但这笔亏损照样发生。"
+        elif liq_hit:
+            tail = "—— 已经触及强平线。"
+        else:
+            tail = "那时离强平还剩 %d%% 的缓冲。" % round(sc["overall"])
+        verdict = "历史上最坏的情况会让你亏掉 <b>%.1f%%</b> 的本金, %s" % (worst_loss, tail)
+        rule_short = ("分数 = 100 − 用掉的强平距离; 触及强平记 0 分。60 分以上算稳健, 30 分以下算危险。"
+                      if not pf_spot_only else "全是现货: 分数 = 100 − 亏掉的本金比例。60 分以上算稳健。")
+
+        with st.container(key="card_score"):
+            html(ui.card_head("安全分", "5 年 %d 个交易日重演 · 总分取三项里最低的一项" % len(rep.daily_dates)))
+            html(ui.score_grid(sc["overall"], score.grade(sc["overall"]), sc["weakest_label"],
+                               sc["items"], verdict, rule_short))
+            if st.session_state.get("pf_prev_score") is not None:
+                html(ui.compare_line(st.session_state["pf_prev_score"], sc["overall"]))
+            # 分点结论的第一条是「安全总分」, 和上面的四格分数卡重复 -> 这里不再重复一遍
+            _lines = [l for l in rep.narrative.splitlines() if "**安全总分**" not in l]
+            html(ui.bullets("\n".join(_lines), sc["overall"]))
+            b_l, b_r = st.columns([3, 2])
+            with b_l:
                 if llm.available_provider() and rep.narrative_by == "template" and st.button(
-                        "让大模型用人话总结 (1–2 分钟, 写完逐个核对数字)", key="pf_narrate"):
+                        "让大模型用人话总结 (1–2 分钟, 写完逐个核对数字)", key="pf_narrate", width="stretch"):
                     if budget.take():
                         with st.spinner("大模型写结论中..."):
                             pcard.narrate(rep, log=get_log())
                         st.rerun()
                     else:
                         st.warning("大模型今日额度已用完 (%s)。上面的分点结论由模板生成, 数字完全一样。" % budget.status_text())
+            b_r.caption("结论生成方式: %s" % rep.narrative_by)
+            with st.expander(("亏损尺" if pf_spot_only else "强平距离尺") + " · 打分规则原文"):
+                html(ui.ruler(sc["items"], "本金亏光" if pf_spot_only else "强平"))
+                st.caption("规则: " + sc["rule"])
 
-    with c3:
-        with st.container(key="panel_03"):
-            html(ui.panel_title("03", "调整方案", "重新打分"))
-            if rep is None:
-                st.caption("运行后显示。")
-            else:
-                for s in rep.suggestions:
+        with st.container(key="card_plans"):
+            html(ui.card_head("调整方案", "每个方案都用同一套历史重新打分"))
+            cols = st.columns(max(len(rep.suggestions), 1), gap="medium")
+            for col, s in zip(cols, rep.suggestions):
+                with col:
                     html(ui.suggestion_card(s))
                     if s["account"] is None:
                         continue
-                    b1, b2 = st.columns([2, 3])
-                    if b1.button("套用", key="apply_" + s["key"], width="stretch"):
-                        d = s["account"]
-                        st.session_state["pf_account"] = pf.account_from_dict(d)
+                    b1, b2 = st.columns(2)
+                    # 不在这里 st.rerun(): 按钮点击本来就会触发一次重跑, 多喊一次会让
+                    # 带版本号的控件键 (pf_usdt_N ...) 在 AppTest 里对不上状态
+                    if b1.button("套用", key="apply_" + s["key"], type="primary", width="stretch"):
+                        st.session_state["pf_account"] = pf.account_from_dict(s["account"])
                         st.session_state["pf_ver"] += 1
                         st.session_state["pf_how"] = "套用方案: " + s["text"]
-                        st.session_state["pf_prev_score"] = rep.scorecard["overall"]
+                        st.session_state["pf_prev_score"] = sc["overall"]
                         st.session_state.pop("pf_report", None)
-                        st.rerun()
                     with b2.popover("去 Bitget", width="stretch"):
                         st.caption("只打开 Bitget 交易页面, 不会自动下单; 数量要你自己在页面上输入。"
                                    "网址 %s 实测可用。" % links.VERIFIED_AT)
-                        for k, step in enumerate(s["steps"]):
+                        for step in s["steps"]:
                             st.markdown("**%s**" % step["text"])
                             l1, l2 = st.columns(2)
                             if step["spot_url"]:
-                                l1.link_button("rToken 现货" if step["kind"] == "position" else "BTC 现货", step["spot_url"],
-                                               width="stretch")
+                                l1.link_button("rToken 现货" if step["kind"] == "position" else "BTC 现货",
+                                               step["spot_url"], width="stretch")
                             if step["futures_url"]:
                                 l2.link_button("永续合约", step["futures_url"], width="stretch")
                             if step["note"]:
                                 st.caption(step["note"])
 
-    if rep is not None:
-        with st.container(key="panel_04"):
-            html(ui.panel_title("04", "地震图上最深的 5 根", "各资产最差价同时出现 · 偏保守"))
-            html(ui.worst_table(rep.worst_days))
-            st.caption("表中历史日期发生了什么事件未核实, 本工具不写原因。")
-            with st.expander("更多情景: 连续持有最差 · 预设假设情景 · 最差 10 天完整表"):
+        with st.container(key="card_quake"):
+            html(ui.card_head("放回过去 5 年的每一天",
+                              "%s → %s · 每根线 = 当天账户亏损 (各资产最差价同时出现)"
+                              % (rep.daily_dates[0], rep.daily_dates[-1])))
+            html(ui.seismograph(rep.daily_dates, rep.daily_loss, rep.liq_loss))
+            with st.expander("地震图上最深的 5 根 · 更多情景"):
+                html(ui.worst_table(rep.worst_days))
+                st.caption("表中历史日期发生了什么事件未核实, 本工具不写原因。")
                 x1, x2 = st.columns(2)
                 x1.markdown("**连续持有最差 (收盘价)**")
                 x1.dataframe(pd.DataFrame(rep.multi_days), width="stretch", hide_index=True)
                 x2.markdown("**预设假设情景** (情景参数是假设, 不是预测)")
                 x2.dataframe(pd.DataFrame(rep.presets), width="stretch", hide_index=True)
                 st.dataframe(pd.DataFrame(rep.worst_days), width="stretch", hide_index=True)
-            with st.expander("事实表与来源 (每个数字是哪次数据调用算出来的)"):
-                render_facts(rep.facts)
-            with st.expander("提示与规则"):
-                for w in rep.warnings:
-                    st.write("- " + w)
-            with st.expander("本次数据调用记录 (原始)"):
-                st.json(rep.provenance)
+
+        html(ui.evidence_bar(sc["evidence"]))
+        f1, f2, f3 = st.columns(3)
+        with f1.expander("事实表与来源 (%d 条)" % len(rep.facts)):
+            render_facts(rep.facts)
+        with f2.expander("提示与规则"):
+            for w in rep.warnings:
+                st.write("- " + w)
+        with f3.expander("本次数据调用记录 (%d 次)" % len(rep.provenance)):
+            st.json(rep.provenance)
 
 # ================================================================ 单笔
 with tab_trade:
@@ -569,5 +611,5 @@ with st.expander("数据源详情 · Bitget Skill 全部工具检测"):
                        "所以雷达里的恐惧贪婪、加密总市值、美股价格照常有数据, 只是不经过 Skill。")
 
 
-# ---------------------------------------------------------------- 顶栏 (最后再更新一次: 反映本次取数结果与 Skill 检测)
-html(ui.header(*header_status(check_skill=True)), header_slot)
+# ------------------------------------------------ 侧栏状态最后再刷一次 (这时才做 Skill 网络检测, 不拖慢首屏)
+html(ui.status_rows(sidebar_status(check_skill=True)), status_slot)

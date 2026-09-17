@@ -24,10 +24,10 @@ def report(tag, t):
     global problems
     exc = [e.value for e in at.exception]
     problems += bool(exc)
-    scores = [re.search(r">(\d\d)</div>", v).group(1) for v in md_all() if "font-size:96px" in v and re.search(r">(\d\d)</div>", v)]
+    scores = re.findall(r"font-size:40px;font-weight:700;line-height:1.15;color:[^\"]+;\">(\d+)", " ".join(md_all()))
     print("[%s] %.1fs  异常: %s" % (tag, time.time() - t, exc or "无"))
     print("  安全总分:", scores or "无", "| 地震图:", any("<polyline" in v for v in md_all()),
-          "| 顶栏:", any("RTOKEN STRESS DESK" in v for v in md_all()))
+          "| 顶栏:", any("rToken Stress Desk" in v for v in md_all()))
     print("  解析/方式:", [c.value[:80] for c in at.caption if c.value.startswith(("解析", "结论生成方式"))][:3])
     print("  错误/警告:", [e.value[:80] for e in at.error] + [w.value[:80] for w in at.warning] or "无")
 
@@ -39,7 +39,7 @@ def click(label):
 report("首次加载", t0)
 
 t = time.time()
-click("运行组合压力测试")
+click("运行压力测试")
 at.run()
 report("组合: 默认示例", t)
 try:
@@ -52,7 +52,7 @@ for q in ["把 MSTR 砍半呢", "把 COIN 换成 AAPL 呢", "一半 NVDA 换成 
           "BTC 全部换成 USDT 呢"]:
     t = time.time()
     at.text_input(key="pf_query").input(q)
-    click("解析 / 修改")
+    click("运行压力测试")
     at.run()
     report("组合追问: " + q, t)
 
@@ -61,13 +61,13 @@ t = time.time()
 at.run()
 report("组合: 套用第一个方案", t)
 t = time.time()
-click("运行组合压力测试")
+click("运行压力测试")
 at.run()
 report("组合: 套用后重新运行", t)
 
 t = time.time()
 at.text_input(key="pf_query").input("保证金 2万U, 多英伟达 1.5万, 多特斯拉 1万, 空纳指 1万")
-click("解析 / 修改")
+click("运行压力测试")
 at.run()
 report("组合: 新组合", t)
 
@@ -81,7 +81,7 @@ at.session_state["pf_account"] = pf.Account(
 at.session_state["pf_ver"] = 99
 at.session_state["pf_report"] = None
 at.run()
-click("运行组合压力测试")
+click("运行压力测试")
 at.run()
 report("组合: 全现货零保证金", t)
 page = " ".join(md_all())
