@@ -106,6 +106,15 @@ def skill_in_use_ok() -> bool:
         return False
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def stock_mcp_ok() -> tuple:
+    """Bitget 官方美股 MCP 通不通。本机 (马来西亚) 连不上, 云端正常 -> 如实显示, 不影响其它内容。"""
+    from desk.sources import bitget_mcp as bmcp
+    ok, msg, _ = bmcp.health(timeout=12)
+    return ok, ("%d 个入口" % int(msg.split("·")[-1].strip().split(" ")[0]) if ok and "入口" in msg else
+                ("可用" if ok else "本机不可达"))
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def rtoken_cache_asof() -> str | None:
     try:
@@ -195,6 +204,7 @@ def sidebar_status(check_skill: bool) -> list[tuple]:
         (yahoo_ok, "美股 / BTC 行情", "Yahoo"),
         (bool(asof), "rToken 行情", ("截至 %s" % asof) if asof else "缓存读取失败"),
         (skill[0], "Bitget Skill", skill[1]),
+        (stock_mcp_ok()[0], "Bitget 美股 MCP", stock_mcp_ok()[1]),
         (True if (provider and left) else (False if provider else None), "大模型",
          ("%s 剩 %d 次" % (provider.upper(), left)) if provider else "未配置"),
         (log_ok, "调用日志", log_text),
@@ -681,8 +691,18 @@ with tab_radar:
                 html(ui.insider_table(rad["insider"]))
                 st.caption("只把 P (公开市场买入) 和 S (公开市场卖出) 算成买卖; 授予、行权、代扣税不算 —— "
                            "高管「卖出」里很大一部分其实是行权和代扣税。金额只统计已解析的那几份, 表里标了覆盖范围。")
+                if rad.get("insider_xcheck"):
+                    html(ui.xcheck_line(rad["insider_xcheck"]))
+                    st.caption("同一件事两个独立来源对一遍: 左边这张表是我们自己解析的 SEC Form 4, "
+                               "核对方是 Bitget 官方美股 MCP (bitget-mcp-server)。对不上会标黄, 不会悄悄选一个信。")
             else:
                 st.caption("持仓里没有个股 (ETF 没有内部人)。")
+
+            if rad.get("price_targets"):
+                st.write("")
+                st.markdown("**分析师目标价** (Bitget 官方美股 MCP)")
+                html(ui.target_table(rad["price_targets"], get_prices(tuple(sorted({r["symbol"] for r in rad["price_targets"]})))))
+                st.caption("只取每只最新的一条; 目标价是分析师的观点, 不是预测, 更不是本工具的判断。")
 
             with st.expander("每个数字的来源 (%d 次调用)" % len(rad["provenance"])):
                 for m in rad["metrics"]:

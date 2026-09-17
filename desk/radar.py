@@ -144,6 +144,68 @@ def insider(symbols: list[str], log: CallLog | None = None, days: int = 90, max_
     return rows, provs
 
 
+def _stock_mcp(timeout: float = 8.0):
+    """
+    连一次官方美股 MCP。连不上就整块跳过 —— 每个标的各等满超时会把雷达从 14 秒拖到 140 秒
+    (2026-09-17 本机实测: 运营商挡 agent.bitget.com, 6 次调用各等 25 秒)。
+    返回 (client | None, 来源记录)。
+    """
+    from .sources import bitget_mcp as bmcp
+    c = bmcp.StockMCP(timeout=timeout)
+    t0 = time.time()
+    try:
+        info = c.connect()
+        return c, Provenance("bitget_mcp", bmcp.URL, {"probe": "initialize"}, time.time(),
+                             int((time.time() - t0) * 1000), True, n_records=1)
+    except Exception as e:                                          # noqa: BLE001
+        return None, Provenance("bitget_mcp", bmcp.URL, {"probe": "initialize"}, time.time(),
+                                int((time.time() - t0) * 1000), False,
+                                error="%s: %s" % (type(e).__name__, str(e)[:120]))
+
+
+def insider_crosscheck(rows: list[dict], client=None, log: CallLog | None = None):
+    """
+    拿 Bitget 官方美股 MCP 的内部人交易, 和我们自己解析的 SEC Form 4 对一遍。
+    同一件事两个独立来源对得上 = 可信; 对不上要标出来, 不能悄悄选一个信。
+    """
+    from .sources import bitget_mcp as bmcp
+    out, provs = [], []
+    if not rows or client is None:
+        return out, provs
+    for r in rows:
+        official, p = bmcp.insider_trading(r["symbol"], client)
+        provs.append(p)
+        item = {"symbol": r["symbol"], "sec_latest": r.get("latest"), "sec_filings": r["n_filings"],
+                "official_latest": None, "official_rows": None, "agree": None, "error": p.error}
+        if official:
+            item["official_rows"] = len(official)
+            item["official_latest"] = (official[0] or {}).get("filing_date")
+            item["agree"] = (item["official_latest"] == item["sec_latest"])
+        out.append(item)
+    _log_all(log, provs)
+    return out, provs
+
+
+def price_targets(symbols: list[str], client=None, log: CallLog | None = None):
+    """分析师目标价 (Bitget 官方美股 MCP)。开仓前的参考: 市场共识价位在哪、最近谁改了评级。"""
+    from .sources import bitget_mcp as bmcp
+    out, provs = [], []
+    stocks = [s for s in symbols if s not in ETFS]
+    if not stocks or client is None:
+        return out, provs
+    for sym in stocks:
+        rows, p = bmcp.price_target(sym, client)
+        provs.append(p)
+        if not rows:
+            continue
+        latest = rows[0]
+        out.append({"symbol": sym, "date": latest.get("published_date"), "firm": latest.get("analyst_firm"),
+                    "target": latest.get("price_target"), "rating": latest.get("rating_current"),
+                    "action": latest.get("action"), "n": len(rows)})
+    _log_all(log, provs)
+    return out, provs
+
+
 def fear_greed(log: CallLog | None = None):
     """加密恐惧贪婪指数 (alternative.me)。只有这一个免费来源, 界面上要标明。"""
     data, prov = _get("alternative.me", ALTME, {"limit": 30}, lambda j: j["data"])
@@ -319,6 +381,18 @@ def radar(symbols: list[str], log: CallLog | None = None, with_earnings: bool = 
     provs += eps
     ins, ips = insider(symbols, log=log) if with_earnings else ([], [])
     provs += ips
+    # 官方美股 MCP: 先连一次, 连不上就整块跳过 (否则每个标的都等满超时)
+    xcheck, targets = [], []
+    if with_earnings:
+        mcp_client, mprov = _stock_mcp()
+        provs.append(mprov)
+        _log_all(log, [mprov])
+        if mcp_client is not None:
+            xcheck, xps = insider_crosscheck(ins, mcp_client, log=log)
+            provs += xps
+            targets, tps = price_targets(symbols, mcp_client, log=log)
+            provs += tps
     return {"metrics": [m.to_dict() for m in metrics], "earnings": earn, "insider": ins,
+            "insider_xcheck": xcheck, "price_targets": targets,
             "provenance": [p.to_dict() for p in provs],
             "warn": [m.key for m in metrics if m.status == "warn"]}

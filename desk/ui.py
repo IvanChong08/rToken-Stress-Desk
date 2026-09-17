@@ -545,3 +545,40 @@ def insider_table(rows: list[dict]) -> str:
             '<th style="text-align:right;">净买卖 (已解析部分)</th><th>最近一份</th><th>申报人</th><th style="text-align:right;">已解析</th></tr>%s</table>'
             % body)
 
+def xcheck_line(rows: list[dict]) -> str:
+    """内部人交易的两源核对结果 (我们解析的 SEC vs Bitget 官方 MCP)。"""
+    if not rows:
+        return ""
+    cells = ""
+    for r in rows:
+        if r.get("agree") is True:
+            col, txt = GREEN, "%s 两源一致 (%s)" % (r["symbol"], r["sec_latest"] or "—")
+        elif r.get("agree") is False:
+            col, txt = AMBER, "%s 最近一份对不上: 我们 %s / 官方 %s" % (r["symbol"], r["sec_latest"], r["official_latest"])
+        else:
+            col, txt = MUTED, "%s 官方源取不到 (%s)" % (r["symbol"], (r.get("error") or "")[:36])
+        cells += ('<span style="display:inline-flex;align-items:center;gap:6px;">'
+                  '<span style="width:6px;height:6px;border-radius:50%%;background:%s;"></span>%s</span>' % (col, esc(txt)))
+    return ('<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:%s;margin-top:8px;">%s</div>'
+            % (SOFT, cells))
+
+
+def target_table(rows: list[dict], prices: dict) -> str:
+    """分析师目标价 (Bitget 官方美股 MCP)。和现价比, 给出还有多少空间。"""
+    body = ""
+    for r in rows:
+        px = prices.get(r["symbol"])
+        gap = ((r["target"] / px - 1) * 100) if (px and r.get("target")) else None
+        col = GREEN if (gap or 0) > 0 else RED
+        body += ('<tr><td class="m">%s</td><td class="m" style="text-align:right;">%s</td>'
+                 '<td class="m" style="text-align:right;">%s</td>'
+                 '<td class="m" style="text-align:right;color:%s;font-weight:700;">%s</td>'
+                 '<td>%s</td><td class="m">%s</td><td class="m">%s</td></tr>'
+                 % (esc(r["symbol"]), ("%.2f" % px) if px else "—",
+                    ("%.0f" % r["target"]) if r.get("target") else "—",
+                    col, ("%+.0f%%" % gap) if gap is not None else "—",
+                    esc(r.get("rating") or "—"), esc(r.get("firm") or "—"), esc(r.get("date") or "—")))
+    return ('<table class="rsd-table"><tr><th>标的</th><th style="text-align:right;">现价</th>'
+            '<th style="text-align:right;">最新目标价</th><th style="text-align:right;">空间</th>'
+            '<th>评级</th><th>机构</th><th>发布日</th></tr>%s</table>' % body)
+
