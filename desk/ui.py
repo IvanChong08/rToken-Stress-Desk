@@ -87,6 +87,13 @@ div[class*="st-key-pf_query"] input, div[class*="st-key-query"] input { height: 
 [data-testid="stSidebar"] .block-container { padding-top: 1.2rem; }
 [data-testid="stSidebar"] [data-testid="stSliderTickBarMin"], [data-testid="stSidebar"] [data-testid="stSliderTickBarMax"] { display: none; }
 
+/* 雷达指标格 */
+.rsd-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 0; }
+@media (max-width: 820px) {
+  .rsd-tiles { grid-template-columns: 1fr 1fr; row-gap: 14px; }
+  .rsd-tiles > div { border-right: 0 !important; padding-left: 0 !important; }
+}
+
 /* 分数四格: 窄屏折成两列 */
 .rsd-grid4 { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr; gap: 0; }
 @media (max-width: 820px) {
@@ -469,3 +476,72 @@ def worst_table(rows: list[dict], k: int = 5) -> str:
     return ('<table class="rsd-table"><tr><th>日期</th><th style="text-align:right;">账户亏损</th>'
             '<th style="text-align:right;">BTC 当日最低</th>%s<th>最拖累</th><th>强平</th></tr>%s</table>'
             % ('<th style="text-align:right;">ETH 当日最低</th>' if has_eth else "", body))
+
+# ---------------------------------------------------------------- 雷达
+def sec_head(text: str, hint: str = "") -> str:
+    """雷达里的分组标题 (细分隔线 + 一句话说明这组是干嘛的)。"""
+    return ('<div style="display:flex;align-items:baseline;gap:8px;font-size:11.5px;color:%s;letter-spacing:0.04em;'
+            'margin:18px 0 10px;padding-top:13px;border-top:1px solid %s;">%s'
+            '<span style="color:%s;">%s</span></div>' % (MUTED, LINE2, esc(text), "#a9adb5", esc(hint)))
+
+
+def tiles(items: list[dict]) -> str:
+    """
+    一排等高的指标格: 小标签 / 大数字 / 细百分位条 / 一行说明。
+    item: {label, value, unit, pct(0-100 或 None), note, ok}
+    数字和单位分开排 —— 挤在一个字符串里会折行, 一排格子就高低不齐 (09-17 Ivan 反馈)。
+    """
+    cells = ""
+    for k, it in enumerate(items):
+        border = "" if k == len(items) - 1 else "border-right:1px solid %s;" % LINE2
+        pad = "padding:2px 20px 2px 0;" if k == 0 else "padding:2px 20px;"
+        bar = ""
+        if it.get("pct") is not None:
+            p = min(max(float(it["pct"]), 0), 100)
+            col = GREEN if p < 40 else (AMBER if p < 75 else RED)
+            bar = ('<div style="height:3px;background:%s;margin:8px 0 6px;position:relative;">'
+                   '<i style="position:absolute;left:0;top:0;bottom:0;width:%.0f%%;background:%s;"></i></div>' % (LINE2, p, col))
+        unit = ('<small style="font-size:13px;font-weight:400;color:%s;margin-left:5px;">%s</small>'
+                % (MUTED, esc(it["unit"]))) if it.get("unit") else ""
+        cells += ('<div style="%s%sdisplay:flex;flex-direction:column;">'
+                  '<div style="font-size:12px;color:%s;display:flex;align-items:center;gap:6px;">'
+                  '<span style="width:6px;height:6px;border-radius:50%%;background:%s;"></span>%s</div>'
+                  '<div class="m" style="font-size:30px;font-weight:700;line-height:1.2;color:%s;">%s%s</div>%s'
+                  '<div style="font-size:11.5px;color:%s;margin-top:%s;">%s</div></div>'
+                  % (pad, border, MUTED, GREEN if it.get("ok", True) else AMBER, esc(it["label"]),
+                     INK, esc(it["value"]), unit, bar, MUTED, "auto" if bar else "8px", esc(it.get("note", ""))))
+    return '<div class="rsd-tiles">%s</div>' % cells
+
+
+def crosscheck_table(rows: list[dict]) -> str:
+    """价格交叉核对: 六张一模一样的卡片改成一张表, 一眼能比。"""
+    body = ""
+    for r in rows:
+        srcs = (r["sources_text"] + ["—", "—"])[:3]
+        diff_color = AMBER if r.get("warn") else GREEN
+        body += ('<tr><td class="m">%s</td><td class="m">%s</td><td class="m">%s</td><td class="m">%s</td>'
+                 '<td class="m" style="text-align:right;color:%s;font-weight:%s;">%s</td></tr>'
+                 % (esc(r["symbol"]), esc(srcs[0]), esc(srcs[1]), esc(srcs[2]),
+                    diff_color, "700" if r.get("warn") else "400", esc(r["diff"])))
+    return ('<table class="rsd-table"><tr><th>标的</th><th>来源 1</th><th>来源 2</th><th>来源 3</th>'
+            '<th style="text-align:right;">最大差异</th></tr>%s</table>' % body)
+
+
+def insider_table(rows: list[dict]) -> str:
+    """内部人交易 (SEC Form 4)。金额只来自已解析的那几份, 必须在表里写清楚。"""
+    body = ""
+    for r in rows:
+        net = r["net_usd"]
+        col = GREEN if net > 0 else (RED if net < 0 else MUTED)
+        amount = "%s$%s" % ("+" if net > 0 else ("−" if net < 0 else ""), format(round(abs(net)), ","))
+        cover = ("%d / %d 份" % (r["parsed"], r["n_filings"])) if r.get("partial") else "全部 %d 份" % r["parsed"]
+        who = "、".join(r["people"][:2]) or "—"
+        body += ('<tr><td class="m">%s</td><td class="m" style="text-align:right;">%d</td>'
+                 '<td class="m" style="text-align:right;color:%s;font-weight:700;">%s</td>'
+                 '<td class="m">%s</td><td>%s</td><td style="color:%s;font-size:11.5px;">%s</td></tr>'
+                 % (esc(r["symbol"]), r["n_filings"], col, amount, esc(r.get("latest") or "—"),
+                    esc(who), MUTED, esc(cover)))
+    return ('<table class="rsd-table"><tr><th>标的</th><th style="text-align:right;">90 天申报数</th>'
+            '<th style="text-align:right;">净买卖 (已解析部分)</th><th>最近一份</th><th>申报人</th><th style="text-align:right;">已解析</th></tr>%s</table>'
+            % body)
+

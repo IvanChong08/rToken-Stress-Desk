@@ -101,6 +101,49 @@ def dvol(currency: str = "BTC", days: int = 1825, log: CallLog | None = None):
                   [prov.label()], "ok", "Deribit 官方波动率指数 (加密版 VIX); 你的保证金就是 %s" % currency), [prov]
 
 
+def put_call(currency: str = "BTC", log: CallLog | None = None):
+    """
+    期权未平仓的看跌/看涨比 (Deribit)。比 DVOL 更前瞻: DVOL 说「波动有多大」,
+    这个说「市场在为下跌付多少钱」。>1 = 看跌未平仓更多。
+    """
+    data, prov = _get("deribit", DERIBIT + "/get_book_summary_by_currency",
+                      {"currency": currency, "kind": "option"}, lambda j: j["result"])
+    _log_all(log, [prov])
+    key, label = "pc_%s" % currency.lower(), "%s 期权 看跌/看涨" % currency
+    if not data:
+        return Metric(key, label, None, "取数失败", [prov.label()], "warn"), [prov]
+    put = sum(float(x.get("open_interest") or 0) for x in data if x["instrument_name"].endswith("-P"))
+    call = sum(float(x.get("open_interest") or 0) for x in data if x["instrument_name"].endswith("-C"))
+    if call <= 0:
+        return Metric(key, label, None, "没有看涨未平仓", [prov.label()], "warn"), [prov]
+    ratio = put / call
+    return Metric(key, label, ratio, "%.2f" % ratio, [prov.label()], "ok",
+                  "看跌 %s / 看涨 %s 张未平仓 · 大于 1 说明市场更愿意为下跌付钱"
+                  % (format(round(put), ","), format(round(call), ","))), [prov]
+
+
+def insider(symbols: list[str], log: CallLog | None = None, days: int = 90, max_filings: int = 3):
+    """
+    持仓标的的内部人交易 (SEC Form 4)。美股最硬的「筹码」数据, 免 key。
+    ⚠️ 金额只统计已解析的那几份 —— 展示时必须写明「已解析 N / 共 M 份」。
+    """
+    from .sources import sec as sec_src
+    rows: list[dict] = []
+    provs: list[Provenance] = []
+    stocks = [s for s in symbols if s not in ETFS]
+    if not stocks:
+        return rows, provs
+    with ThreadPoolExecutor(max_workers=min(4, len(stocks))) as ex:
+        for res in ex.map(lambda s: sec_src.insider_activity(s, days=days, max_filings=max_filings), stocks):
+            d, ps = res
+            provs += ps
+            if d is not None:
+                rows.append(d)
+    _log_all(log, provs)
+    rows.sort(key=lambda r: -r["n_filings"])
+    return rows, provs
+
+
 def fear_greed(log: CallLog | None = None):
     """加密恐惧贪婪指数 (alternative.me)。只有这一个免费来源, 界面上要标明。"""
     data, prov = _get("alternative.me", ALTME, {"limit": 30}, lambda j: j["data"])
@@ -258,12 +301,13 @@ def radar(symbols: list[str], log: CallLog | None = None, with_earnings: bool = 
         "ctx": lambda: crypto_context(log),
         "crypto_px": lambda: crypto_price_crosscheck(log),
         "stock_px": lambda: stock_price_crosscheck(symbols, log),
+        "pc_btc": lambda: put_call("BTC", log),
     }
     with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
         results = dict(zip(jobs, ex.map(lambda f: f(), jobs.values())))
     metrics: list[Metric] = []
     provs: list[Provenance] = []
-    for key in ("vix", "dvol_btc", "dvol_eth", "fng", "ctx"):
+    for key in ("vix", "dvol_btc", "dvol_eth", "pc_btc", "fng", "ctx"):
         m, ps = results[key]
         metrics.append(m)
         provs += ps
@@ -273,6 +317,8 @@ def radar(symbols: list[str], log: CallLog | None = None, with_earnings: bool = 
         provs += ps
     earn, eps = earnings(symbols, log=log) if with_earnings else ([], [])
     provs += eps
-    return {"metrics": [m.to_dict() for m in metrics], "earnings": earn,
+    ins, ips = insider(symbols, log=log) if with_earnings else ([], [])
+    provs += ips
+    return {"metrics": [m.to_dict() for m in metrics], "earnings": earn, "insider": ins,
             "provenance": [p.to_dict() for p in provs],
             "warn": [m.key for m in metrics if m.status == "warn"]}

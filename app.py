@@ -599,21 +599,96 @@ with tab_radar:
                 st.session_state["radar"] = get_radar(tuple(syms), get_log())
         rad = st.session_state.get("radar")
         if rad is None:
-            st.caption("点「取数」显示: VIX · BTC/ETH 波动率指数 DVOL · 加密恐惧贪婪 · 加密总市值 · 价格交叉核对 · 你持仓标的的下次财报")
+            st.caption("点「取数」显示: 波动率 (VIX · BTC/ETH DVOL · 期权看跌看涨比) · 情绪与规模 · "
+                       "价格多来源交叉核对 · 持仓标的的下次财报与内部人交易")
         else:
-            cards = rad["metrics"]
-            for i in range(0, len(cards), 3):
-                cols = st.columns(3)
-                for col, m in zip(cols, cards[i:i + 3]):
-                    with col:
-                        html(ui.metric_card(m))
-                        with st.popover("来源", width="stretch"):
-                            for s in m["sources"]:
-                                st.code(s, language=None)
-            st.write("")
-            html(ui.panel_title("06", "你持仓标的的下次财报", "财报是隔夜跳空最常见的来源"))
+            by_key = {m["key"]: m for m in rad["metrics"]}
+
+            def num(key, split_unit=""):
+                """把 Metric 的 display 拆成 数字 + 单位, 分开排才不会折行。"""
+                m = by_key.get(key) or {}
+                d = m.get("display", "—")
+                head = d.split(" · ")[0].split(" (")[0]
+                if split_unit and split_unit in head:
+                    head = head.replace(split_unit, "").strip()
+                return head, m
+
+            def pct_of(m):
+                """从 display 里取出百分位 (只用来画细条, 数字本身仍来自 Metric)。"""
+                mm = re.search(r"百分位\s*(\d+(?:\.\d+)?)%", (m or {}).get("display", ""))
+                return float(mm.group(1)) if mm else None
+
+            # ---- 波动率 ----
+            html(ui.sec_head("波动率", "· 越高说明市场越紧张"))
+            vix_v, vix_m = num("vix")
+            btc_v, btc_m = num("dvol_btc")
+            eth_v, eth_m = num("dvol_eth")
+            pc_v, pc_m = num("pc_btc")
+            html(ui.tiles([
+                {"label": "VIX 美股波动率", "value": vix_v, "pct": pct_of(vix_m),
+                 "note": (vix_m.get("display", "").split(" · ")[1:] or [""])[0], "ok": vix_m.get("status") == "ok"},
+                {"label": "BTC 波动率 DVOL", "value": btc_v, "pct": pct_of(btc_m),
+                 "note": (btc_m.get("display", "").split(" · ")[1:] or [""])[0] + " · 你的保证金就是 BTC",
+                 "ok": btc_m.get("status") == "ok"},
+                {"label": "ETH 波动率 DVOL", "value": eth_v, "pct": pct_of(eth_m),
+                 "note": (eth_m.get("display", "").split(" · ")[1:] or [""])[0] + " · Deribit 官方",
+                 "ok": eth_m.get("status") == "ok"},
+                {"label": "BTC 期权 看跌/看涨", "value": pc_v, "pct": None,
+                 "note": pc_m.get("note", ""), "ok": pc_m.get("status") == "ok"},
+            ]))
+
+            # ---- 情绪与规模 ----
+            html(ui.sec_head("情绪与规模"))
+            fng_m = by_key.get("fng", {})
+            fng_head = fng_m.get("display", "—").split(" · ")[0]
+            fng_num = fng_head.split(" ")[0]
+            ctx_m = by_key.get("cg_global", {})
+            ctx_d = ctx_m.get("display", "—")
+            mcap = ctx_d.split(" 万亿美元")[0] if "万亿美元" in ctx_d else ctx_d.split(" · ")[0]
+            dom = re.search(r"BTC 占比\s*([\d.]+)%", ctx_d)
+            html(ui.tiles([
+                {"label": "加密恐惧贪婪", "value": fng_num, "unit": fng_head.replace(fng_num, "").strip(" ()"),
+                 "pct": float(fng_num) if fng_num.replace(".", "").isdigit() else None,
+                 "note": (fng_m.get("display", "").split(" · ")[1:] or [""])[0] + " · 只有这一个免费来源, 无法交叉核对",
+                 "ok": fng_m.get("status") == "ok"},
+                {"label": "加密总市值", "value": mcap, "unit": "万亿美元", "pct": None,
+                 "note": (re.search(r"\(24h [^)]+\)", ctx_d).group(0) if re.search(r"\(24h [^)]+\)", ctx_d) else "") + " · CoinGecko",
+                 "ok": ctx_m.get("status") == "ok"},
+                {"label": "BTC 占比", "value": dom.group(1) if dom else "—", "unit": "%", "pct": None,
+                 "note": "占比越高说明资金越集中在 BTC", "ok": ctx_m.get("status") == "ok"},
+            ]))
+
+            # ---- 价格交叉核对 (六张同构卡片 -> 一张表) ----
+            html(ui.sec_head("价格交叉核对", "· 差异超过阈值会标黄"))
+            rows, px_metrics = [], [m for m in rad["metrics"] if m["key"].endswith("_px") or "价格" in m["label"] or "现价" in m["label"]]
+            for m in px_metrics:
+                parts = [x.strip() for x in m["display"].split(" · ")]
+                diff = next((x for x in parts if x.startswith(("差异", "最大差异"))), "—")
+                rows.append({"symbol": m["label"].split(" ")[0], "sources_text": [x for x in parts if not x.startswith(("差异", "最大差异"))],
+                             "diff": diff.replace("最大差异", "").replace("差异", "").strip(), "warn": m["status"] != "ok"})
+            if rows:
+                html(ui.crosscheck_table(rows))
+                st.caption("Yahoo 是收盘价, 另两家是实时价 —— 盘后本来就有差。差异只用来发现「某一家明显不对」, 不是套利信号。")
+
+            # ---- 持仓标的: 财报 + 内部人 ----
+            html(ui.sec_head("你持仓标的", "· 财报和内部人卖出都是隔夜跳空的常见来源"))
+            st.markdown("**下次财报**")
             html(ui.earnings_table(rad["earnings"]))
-            st.caption("Nasdaq 财报日历实测只覆盖约未来 50 天; 更远的按该标的历史财报间隔推算, 表里标「估算」。")
+            st.caption("Nasdaq 财报日历实测只覆盖约未来 50 天; 更远的按历史财报间隔推算, 标「估算」。")
+            st.write("")
+            st.markdown("**内部人交易 (SEC Form 4)**")
+            if rad.get("insider"):
+                html(ui.insider_table(rad["insider"]))
+                st.caption("只把 P (公开市场买入) 和 S (公开市场卖出) 算成买卖; 授予、行权、代扣税不算 —— "
+                           "高管「卖出」里很大一部分其实是行权和代扣税。金额只统计已解析的那几份, 表里标了覆盖范围。")
+            else:
+                st.caption("持仓里没有个股 (ETF 没有内部人)。")
+
+            with st.expander("每个数字的来源 (%d 次调用)" % len(rad["provenance"])):
+                for m in rad["metrics"]:
+                    st.markdown("**%s** — %s" % (m["label"], m["display"]))
+                    for src in m["sources"]:
+                        st.code(src, language=None)
             failed = [p for p in rad["provenance"] if not p["ok"]]
             st.caption("本次共 %d 次数据调用, 失败 %d 次%s" % (len(rad["provenance"]), len(failed),
                                                           (": " + ", ".join(sorted({p["source"] for p in failed}))) if failed else ""))
