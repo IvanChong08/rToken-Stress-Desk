@@ -403,6 +403,13 @@ def bullets(md: str, overall: float | None = None) -> str:
 
 
 # ---------------------------------------------------------------- 持仓汇总
+def stale_note(text: str) -> str:
+    """结果过期的提示条 (表格改了但还没重新运行)。"""
+    return ('<div style="display:flex;align-items:center;gap:8px;background:#fdf7ec;border:1px solid #f2e2c4;'
+            'border-radius:7px;padding:8px 12px;margin:2px 0 8px;font-size:12.5px;color:#8a6417;">'
+            '<span style="font-weight:700;">!</span><span>%s</span></div>' % esc(text))
+
+
 def summary_line(pairs: list[tuple[str, str]]) -> str:
     """表格下面那一行: 保证金 / 权益 / 总仓位 / 有效杠杆 / 未实现盈亏。"""
     cells = "".join('<span style="color:%s;">%s <b class="m" style="color:%s;font-size:13.5px;font-weight:700;">%s</b></span>'

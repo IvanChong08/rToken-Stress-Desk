@@ -349,15 +349,22 @@ with tab_pf:
                 ("有效杠杆", ("%.2f×" % (gross / equity)) if equity > 0 else "—"),
                 ("未实现盈亏", "%s%s" % ("+" if upnl > 0 else ("−" if upnl < 0 else ""), format(round(abs(upnl)), ","))),
             ]))
+            # 改完表格的人手就停在表格这儿, 上面那个按钮要滚回去才够得着 -> 这里再放一个
+            _rep0 = st.session_state.get("pf_report")
+            stale = _rep0 is not None and account_key(cur) != account_key(pf.account_from_dict(_rep0.account))
+            note_slot = st.empty()          # 先占位: 点了按钮就要重跑, 那就别再说「结果是旧的」
+            go_bottom = st.button("运行压力测试" if not stale else "用改过的持仓重新运行",
+                                  type="primary", key="pf_run_bottom", width="stretch")
+            if go_bottom:
+                go = True
+            if stale and not go:
+                html(ui.stale_note("表格改过了, 下面的分数还是上一次的结果"), note_slot)
 
     # ?demo=1: 打开页面就自动跑一次示例组合 (给评委 / 录屏用); 只在本会话还没有报告时触发
     demo_autorun = st.query_params.get("demo") == "1" and "pf_report" not in st.session_state
-    # 表格改了就自动重算, 不用再点按钮:
-    # canvas 表格在「单元格还在编辑中」时点按钮, 那一下点击会被它拿去提交编辑, 按钮收不到,
-    # 用户看到的就是「按不动」(09-17 Ivan 实测)。取数有缓存, 重算通常 1 秒以内。
-    _rep = st.session_state.get("pf_report")
-    stale = _rep is not None and not err and account_key(cur) != account_key(pf.account_from_dict(_rep.account))
-    if (go or run_now or demo_autorun or stale) and not err:
+    # ⚠️ 这里不能「一改就自动重算」: 表格每提交一格都会重跑, 用户还没打完就被冲掉 (09-17 实测)。
+    # 只用 stale 判断「结果是不是上一次的」, 显示提示 + 一个就近的按钮, 由用户决定什么时候跑。
+    if (go or run_now or demo_autorun) and not err:
         log = get_log()
         try:
             with st.spinner("取 5 年行情并重演中..."):

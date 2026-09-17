@@ -115,28 +115,32 @@ for text in ["3 倍做多 AMD 过周末", "100 倍做多 NVDA 过周末", "做�
 
 print("\n用时 %.0f 秒" % (time.time() - t0))
 
-# ---- 7. 改了持仓要自动重算, 不用再点按钮 ----
-# canvas 表格在单元格编辑中时, 点按钮那一下会被它拿去提交编辑, 按钮收不到 -> 用户以为按不动
+# ---- 7. 改了持仓: 不能自动重跑 (会把正在输入的内容冲掉), 要提示结果过期 + 给一个就近的按钮 ----
 a5 = new_app()
 run_btn(a5, "运行压力测试")
 before = a5.session_state["pf_report"].scorecard["overall"]
 a5.session_state["pf_account"] = pf.Account(
-    [pf.Position("NVDA", "long", 3000.0)], usdt=5000.0, btc=0.1)      # 仓位大幅缩小 -> 分数必然变高
+    [pf.Position("NVDA", "long", 3000.0)], usdt=5000.0, btc=0.1)      # 仓位大幅缩小
 a5.session_state["pf_ver"] = a5.session_state["pf_ver"] + 1
 a5.run()                                                              # 不点任何按钮
-after = a5.session_state["pf_report"].scorecard["overall"]
-ok = after != before and not a5.exception
-if not ok:
-    problems.append("改持仓后没有自动重算 (%s -> %s)" % (before, after))
-check(a5, "改持仓后自动重算", "总分 %s -> %s %s" % (before, after, "OK" if ok else "★没重算"))
+kept = a5.session_state["pf_report"].scorecard["overall"] == before
+if not kept:
+    problems.append("改持仓后自动重跑了 —— 用户还没打完就会被冲掉")
+page = " ".join(m.value for m in a5.markdown)
+has_note = "表格改过了" in page
+has_btn = any(b.label == "用改过的持仓重新运行" for b in a5.button)
+if not (has_note and has_btn):
+    problems.append("结果过期时没有提示或没有就近的按钮 (提示=%s 按钮=%s)" % (has_note, has_btn))
+check(a5, "改持仓: 不自动重跑", "分数仍是 %.0f · 过期提示=%s · 就近按钮=%s" % (before, has_note, has_btn))
 
-# 同一个组合重跑不应该反复触发 (浮点噪声不能引起无限重算)
-rep_id = id(a5.session_state["pf_report"])
-a5.run()
-same = id(a5.session_state["pf_report"]) == rep_id
-if not same:
-    problems.append("没改动却又重算了一次 (会无限循环)")
-check(a5, "没改动就不重算", "OK" if same else "★又算了一次")
+run_btn(a5, "用改过的持仓重新运行")
+after = a5.session_state["pf_report"].scorecard["overall"]
+if after == before:
+    problems.append("点了「用改过的持仓重新运行」分数没变")
+check(a5, "点就近按钮才重算", "总分 %.0f -> %.0f" % (before, after))
+page2 = " ".join(m.value for m in a5.markdown)
+if "表格改过了" in page2:
+    problems.append("重算完了过期提示还在")
 
 print("%s" % ("全部通过" if not problems else "发现 %d 个问题:\n  - %s" % (len(problems), "\n  - ".join(problems))))
 sys.exit(1 if problems else 0)
