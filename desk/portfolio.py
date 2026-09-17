@@ -358,8 +358,14 @@ def replay(a: Account, panel: Panel, mode: str = "extreme") -> pd.DataFrame:
         "buffer_used": ((e0 - eq) / buf).values if buf > 0 else float("inf"),
         "btc_move": btc_r.values,
         "eth_move": frame[ETH].values if ETH in frame.columns else float("nan"),
-        "worst_position": worst_pos.idxmin(axis=1).values if len(a.positions) else None,
+        "worst_position": (worst_pos.dropna(how="all").idxmin(axis=1).reindex(worst_pos.index).values
+                           if len(a.positions) else None),
     })
+    # 缺行情的交易日必须丢掉, 不能当成「那天没事」:
+    # NaN 排序会沉到最后 (iloc[0] 永远看不到), eq <= maint 对 NaN 是 False (不计入强平),
+    # 可 len(out) 照样 +1 -> 样本量和「N 次调用全部成功」都会虚高 (2026-09-18 对抗性审查)。
+    # multi_day_worst 一直有 dropna, 这里以前没有, 同一个文件里两套口径。
+    out = out.dropna(subset=["equity", "loss_pct"])
     return out.sort_values("loss_pct", ascending=False).reset_index(drop=True)
 
 

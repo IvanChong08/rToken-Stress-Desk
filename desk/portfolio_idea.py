@@ -565,6 +565,19 @@ ops 可用:
 - 加密货币 (如 SOL、DOGE) 不能作仓位, 不要放进 ops 或 portfolio, 在 reason 里说明""" % universe.sample()
 
 
+def _stash_reason(prov, d: dict) -> None:
+    """
+    把大模型的自由文本 (reason) 收进调用记录, **不显示给用户**。
+    它从不经过 unverified_numbers() 核对 —— 模型只要在这句话里写个数字 (「强平价约 112.50」),
+    就直接出现在界面上, 而 README 承诺的是「大模型不产生任何数字」(2026-09-18 对抗性审查)。
+    想看它说了什么: 展开「本次数据调用记录」。
+    """
+    try:
+        prov.params = {**(prov.params or {}), "llm_reason": str(d.get("reason", ""))[:300]}
+    except Exception:                                   # noqa: BLE001  记不上也不能影响主流程
+        pass
+
+
 def understand(text: str, account: Account, btc_price: float, maint_margin: float = 0.01, btc_haircut: float = 0.95,
                eth_price: float = 0.0, timeout: float = 45.0, budget_check=None):
     """
@@ -616,7 +629,8 @@ def understand(text: str, account: Account, btc_price: float, maint_margin: floa
         if intent == "edit":
             new, notes, err = apply_ops(account, d.get("ops") or [], btc_price, text, eth_price)
             if new is not None:
-                return new, [prov], "大模型理解为: %s → %s%s" % (d.get("reason", ""), "; ".join(notes) or "无变化",
+                _stash_reason(prov, d)
+                return new, [prov], "大模型理解并执行了: %s%s" % ("; ".join(notes) or "无变化",
                                                                 ("。⚠️ " + bad + ", 已忽略") if bad else "")
             return None, [prov], "没能执行这个修改: %s%s" % (err, ("。" + bad) if bad else "")
         if intent == "new":
@@ -630,10 +644,12 @@ def understand(text: str, account: Account, btc_price: float, maint_margin: floa
                 empty = Account([], 0.0, 0.0, maint_margin, btc_haircut)
                 new, notes, err = apply_ops(empty, d["ops"], btc_price, text, eth_price)
                 if new is not None:
-                    return new, [prov], "大模型理解为新组合: %s → %s" % (d.get("reason", ""), "; ".join(notes))
+                    _stash_reason(prov, d)
+                    return new, [prov], "大模型理解为新组合: %s" % "; ".join(notes)
         if intent == "other":
+            _stash_reason(prov, d)
             return None, [prov], (bad + "。" if bad else
-                                  "这个问题超出本工具范围: 这里只做持仓压力测试 (描述组合, 或追问怎么调整)。%s" % d.get("reason", ""))
+                                  "这个问题超出本工具范围: 这里只做持仓压力测试 —— 描述你的组合, 或者追问怎么调整。")
     a = parse_rules(text, maint_margin, btc_haircut)
     if a is not None:
         return a, [prov], "由规则解析为新组合" + (("。⚠️ " + bad + ", 已忽略") if bad else "")

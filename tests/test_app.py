@@ -99,9 +99,14 @@ click("运行压力测试")
 at.run()
 report("组合: 全现货零保证金", t)
 page = " ".join(md_all())
-for name, ok in [("写明不会被强平", "不会被强平" in page), ("不提强平距离", "强平距离" not in page)]:
+import re as _re
+_liq_hits = [m for m in _re.findall(r"[^<>]{0,14}强平[^<>]{0,14}", page)
+             if "不会被强平" not in m and "本金亏光" not in m]
+for name, ok in [("写明不会被强平", "不会被强平" in page),
+                 ("整页不出现任何「强平」字样", not _liq_hits)]:
     problems += not ok
-    print("  %s: %s" % (name, "OK" if ok else "FAIL"))
+    print("  %s: %s%s" % (name, "OK" if ok else "FAIL",
+                          "" if ok else " <- " + str(_liq_hits[:3])))
 
 for q in ["周五收盘前我想 3 倍做多 NVDA rToken 过周末", "如果降到 2 倍呢", "我想买点狗狗币"]:
     t = time.time()

@@ -100,10 +100,19 @@ class CallLog:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 
     def _last_hash(self) -> str:
+        """
+        最后一条的哈希。文件被写坏 (进程写到一半被杀 / 少字段) 时返回 GENESIS 开新段,
+        **不抛异常** —— 以前这里一炸, append 和 verify_log 全炸, 而 verify_log 在页面顶层被调用,
+        结果是整个应用白屏且无法自愈 (2026-09-18 对抗性审查实测)。
+        开新段不会掩盖损坏: verify_log 走到那一行会发现 prev 对不上, 照样报「链损坏」。
+        """
         if not os.path.exists(self.path):
             return GENESIS
-        last = _last_line(self.path)
-        return json.loads(last)["hash"] if last else GENESIS
+        try:
+            last = _last_line(self.path)
+            return json.loads(last)["hash"] if last else GENESIS
+        except (ValueError, KeyError, OSError):
+            return GENESIS
 
     def append(self, prov: Provenance) -> str:
         with _file_lock(self.path):
@@ -121,15 +130,24 @@ def _digest(rec: dict) -> str:
 
 
 def verify_log(path: str) -> tuple[bool, int]:
-    """重算整条链, 返回 (是否完整, 行数)。"""
+    """
+    重算整条链, 返回 (是否完整, 已验证的行数)。
+    解析不了的行 = 链损坏, 返回 (False, n) —— 不能抛异常: 调用方在页面顶层, 一抛就白屏。
+    ⚠️ 这个函数能发现的是「中间某一行被改过」。它**发现不了**:
+       ① 尾部整段被删 (前面的链仍然自洽) ② 有人用 _digest 把下游哈希全部重算
+    所以它防的是误改和意外损坏, 不是防篡改 —— 文案不要写成 append-only 不可篡改。
+    """
     prev, n = GENESIS, 0
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            rec = json.loads(line)
-            h = rec.pop("hash")
-            if rec["prev"] != prev or _digest(rec) != h:
-                return False, n
-            prev, n = h, n + 1
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                h = rec.pop("hash")
+                if rec["prev"] != prev or _digest(rec) != h:
+                    return False, n
+                prev, n = h, n + 1
+    except (ValueError, KeyError, OSError):
+        return False, n
     return True, n

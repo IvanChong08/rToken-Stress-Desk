@@ -77,6 +77,9 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
 
     spot_only = bool(a.positions) and all(p.kind == "spot" for p in a.positions)
     items = {i.key: i for i in sc.items}
+    # 全现货账户不会被强平: 这几条 fact 说的是「离强平多远」, 摆出来和结论自相矛盾
+    # (2026-09-18 对抗性审查: 结论写「不会被强平」, 事实表里还列着「5 年里触及强平 0/2 天」)
+    liq_facts = not spot_only
     facts = [
         Fact("score", "安全总分", sc.overall, "%.0f 分 (%s) · 短板: %s" % (sc.overall, score.grade(sc.overall), sc.weakest_label),
              ["规则: " + score.SCORE_RULE] + allsrc + [assumption]),
@@ -87,7 +90,8 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
         Fact("score_presets", items["presets"].label, items["presets"].score,
              "%.0f 分 · %s" % (items["presets"].score, items["presets"].detail), [items["presets"].basis] + bsrc),
         Fact("equity0", "开仓时账户权益 (按抵押折算)", e0, _usd(e0), bsrc + [assumption]),
-        Fact("buffer", "离强平的距离 (权益 − 维持保证金)", e0 - m0, _usd(e0 - m0), bsrc + [assumption]),
+        *([Fact("buffer", "离强平的距离 (权益 − 维持保证金)", e0 - m0, _usd(e0 - m0), bsrc + [assumption])]
+          if liq_facts else []),
         Fact("gross", "仓位名义价值合计", gross, _usd(gross), ["用户输入"]),
         Fact("eff_lev", "有效杠杆 (名义 ÷ 权益)", gross / e0, "%.2f 倍" % (gross / e0), bsrc + [assumption]),
         Fact("btc_px", "BTC 现价", panel.btc_price, "%s (%s)" % (_usd(panel.btc_price), panel.btc_price_date), bsrc[:1]),
@@ -97,12 +101,14 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
              "%s · 账户亏损 %.1f%%" % (w.date, 100 * w.loss_pct), allsrc),
         Fact("sd_coll", "其中 %s 抵押品缩水" % cn, -float(w.collateral_pnl),
              "%s (占当日亏损 %.0f%%)" % (_usd(-float(w.collateral_pnl)), 100 * coll_share), bsrc + [assumption]),
-        Fact("sd_liq", "5 年里触及强平的交易日", int(rep.liquidated.sum()), "%d / %d 天" % (int(rep.liquidated.sum()), len(rep)),
-             allsrc + [assumption]),
+        *([Fact("sd_liq", "5 年里触及强平的交易日", int(rep.liquidated.sum()),
+                "%d / %d 天" % (int(rep.liquidated.sum()), len(rep)), allsrc + [assumption])] if liq_facts else []),
         Fact("md_loss", "连续 %d 日最差 (收盘价)" % horizon, float(mw.loss_pct),
              "%s 起持有 %d 天 · 账户亏损 %.1f%%" % (mw.start, int(mw.days), 100 * mw.loss_pct), allsrc),
-        Fact("x_follow", "所有仓位同步不利、%s 同跌时, 多少会强平" % cn, x_follow, xdisp(x_follow), [assumption, "计算: 二分求解"]),
-        Fact("x_flat", "所有仓位同步不利、%s 不动时, 多少会强平" % cn, x_flat, xdisp(x_flat), [assumption, "计算: 二分求解"]),
+        *([Fact("x_follow", "所有仓位同步不利、%s 同跌时, 多少会强平" % cn, x_follow, xdisp(x_follow),
+                [assumption, "计算: 二分求解"]),
+           Fact("x_flat", "所有仓位同步不利、%s 不动时, 多少会强平" % cn, x_flat, xdisp(x_flat),
+                [assumption, "计算: 二分求解"])] if liq_facts else []),
     ]
 
     # ---- 可执行调整方案 ----
@@ -149,20 +155,23 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
                    "账户亏损 %": round(100 * r.loss_pct, 1), used_col: round(100 * r.buffer_used, 1),
                    "BTC 当日最低": "%+.1f%%" % (100 * r.btc_move),
                    **({"ETH 当日最低": "%+.1f%%" % (100 * r.eth_move)} if a.eth > 0 else {}),
-                   "最拖累": r.worst_position, "强平": "是" if r.liquidated else ""}
+                   "最拖累": r.worst_position,
+                   **({"强平": "是" if r.liquidated else ""} if liq_facts else {})}
                   for r in rep.head(10).itertuples()]
     multi_days = [{"起点": r.start, "持有天数": int(r.days), "账户亏损 %": round(100 * r.loss_pct, 1),
-                   "BTC 期间": "%+.1f%%" % (100 * r.btc_move), "强平": "是" if r.liquidated else ""}
+                   "BTC 期间": "%+.1f%%" % (100 * r.btc_move),
+                   **({"强平": "是" if r.liquidated else ""} if liq_facts else {})}
                   for r in md.head(5).itertuples()]
     presets = []
     for p in pf.PRESETS:
         r = pf.shock(a, panel.btc_price, pf.preset_moves(a, p), panel.eth_price)
         presets.append({"假设情景": p["name"], "账户亏损 %": round(100 * r.loss_pct, 1),
-                        used_col: round(100 * r.buffer_used, 1), "强平": "是" if r.liquidated else "",
+                        used_col: round(100 * r.buffer_used, 1),
+                        **({"强平": "是" if r.liquidated else ""} if liq_facts else {}),
                         "得分": round(score.from_buffer_used(r.buffer_used, r.liquidated))})
 
     warnings = [
-        "安全分规则: " + score.SCORE_RULE,
+        "安全分规则: " + (score.SCORE_RULE_SPOT if spot_only else score.SCORE_RULE),
         "「各资产最差价同时出现」偏保守; 收盘价口径偏乐观; 两者之间才是真实情况",
         "维持保证金率、加密抵押折算率是你设定的假设, 不是 Bitget 官方数值; 未计手续费、资金费、滑点、分档维持保证金",
         "BTC-USD / ETH-USD 是 UTC 日线, 美股是纽约交易日, 同日对齐是近似; 预设情景里 BTC 和 ETH 按同幅变动假设",

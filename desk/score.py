@@ -53,7 +53,12 @@ class Scorecard:
 
 
 def from_buffer_used(buffer_used: float, liquidated: bool = False) -> float:
-    if liquidated:
+    """
+    用掉多少强平距离 -> 分数。NaN 必须当成 0 分:
+    min(100.0, nan) 在 Python 里返回 100.0, 缺数据的情景会拿到满分 (2026-09-18 对抗性审查实测)。
+    打分函数宁可往危险方向失败, 也不能往安全方向失败。
+    """
+    if liquidated or buffer_used != buffer_used:        # NaN != NaN
         return 0.0
     return max(0.0, min(100.0, 100.0 * (1.0 - buffer_used)))
 

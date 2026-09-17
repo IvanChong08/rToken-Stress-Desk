@@ -15,10 +15,10 @@ import pandas as pd
 sys.path.insert(0, r"D:\ivan-agent\rtoken-stress-desk")
 from desk.card import load_rtoken_cache  # noqa: E402
 from desk.analysis import weekend_gap as wg  # noqa: E402
-from desk.idea import SUPPORTED  # noqa: E402
+from desk.idea import TRADE_SUPPORTED  # noqa: E402   # 有 rToken 小时线缓存的那 11 只
 from desk.sources import yahoo  # noqa: E402
 
-SYMS = sorted(SUPPORTED)
+SYMS = sorted(TRADE_SUPPORTED)
 with ThreadPoolExecutor(11) as ex:
     ydata = dict(zip(SYMS, ex.map(lambda s: yahoo.ohlcv(s, "1y", "1d"), SYMS)))
 

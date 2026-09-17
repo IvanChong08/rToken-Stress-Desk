@@ -85,5 +85,10 @@ check("from_buffer_used 截断上限", score.from_buffer_used(-0.5), 100.0)
 check("from_buffer_used 截断下限", score.from_buffer_used(1.7), 0.0)
 check("grade", score.grade(29.9) + score.grade(30) + score.grade(60), "危险警惕稳健")
 
+# 缺数据不能给满分: min(100.0, nan) 在 Python 里返回 100.0 (2026-09-18 对抗性审查实测)
+check("NaN 记 0 分, 不是满分", score.from_buffer_used(float("nan")), 0.0)
+check("NaN + 已强平也是 0", score.from_buffer_used(float("nan"), True), 0.0)
+check("正常值不受影响", score.from_buffer_used(0.4), 60.0)
+
 print("\n%s" % ("全部通过" if not fails else "%d 项失败" % fails))
 sys.exit(1 if fails else 0)

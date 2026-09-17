@@ -186,8 +186,10 @@ def empty_card(icon: str, title: str, body: str) -> str:
 
 
 # ---------------------------------------------------------------- 地震图
-def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: int = 190) -> str:
-    """5 年地震图: 每个交易日的账户亏损 (向下), 强平线是一条红色虚线。"""
+def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: int = 190,
+                line_label: str = "强平线") -> str:
+    """5 年地震图: 每个交易日的账户亏损 (向下), 强平线是一条红色虚线。
+    line_label: 全现货账户不存在强平, 那条线是「本金亏光」。"""
     n = len(losses)
     if n < 2:
         return '<div style="color:%s;">样本不足, 无法绘制</div>' % MUTED
@@ -224,12 +226,13 @@ def seismograph(dates: list[str], losses: list[float], liq_loss: float, height: 
             '<line x1="0" y1="50" x2="%d" y2="50" stroke="%s" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"></line>'
             '<polyline points="%s" fill="none" stroke="%s" stroke-width="1" vector-effect="non-scaling-stroke" opacity="0.9"></polyline></svg>'
             '<div style="position:absolute;left:0;right:0;top:%.0fpx;border-top:1.5px dashed %s;"></div>'
-            '<div class="m" style="position:absolute;right:0;top:%.0fpx;font-size:11px;color:%s;background:%s;padding:0 6px;">强平线 · 亏损 %.1f%%</div>'
+            '<div class="m" style="position:absolute;right:0;top:%.0fpx;font-size:11px;color:%s;background:%s;padding:0 6px;">%s · 亏损 %.1f%%</div>'
             '<div class="m" style="position:absolute;left:0;top:2px;font-size:10px;color:%s;">0%%</div>'
             '<div class="m" style="position:absolute;left:0;top:%dpx;font-size:10px;color:%s;">50%%</div>%s</div>'
             '<div class="m" style="position:relative;height:16px;margin-top:2px;font-size:10px;color:%s;">%s</div>'
             % (height, height, w, w, LINE, w, LINE2, pts, RED,
-               liq_top, RED, max(liq_top - 20, 0), RED, CARD, 100 * liq_loss, MUTED, height // 2 + 2, MUTED, labels,
+               liq_top, RED, max(liq_top - 20, 0), RED, CARD, esc(line_label), 100 * liq_loss, MUTED,
+               height // 2 + 2, MUTED, labels,
                MUTED, "".join(ticks)))
 
 
@@ -464,18 +467,21 @@ def earnings_table(rows: list[dict]) -> str:
 
 def worst_table(rows: list[dict], k: int = 5) -> str:
     has_eth = bool(rows) and "ETH 当日最低" in rows[0]
+    has_liq = bool(rows) and "强平" in rows[0]          # 全现货账户没有这一列
     body = ""
     for i, r in enumerate(rows[:k]):
         first = i == 0
         body += ('<tr%s><td class="m">%s</td><td class="m" style="text-align:right;color:%s;%s">−%.1f%%</td>'
-                 '<td class="m" style="text-align:right;">%s</td>%s<td class="m">%s</td><td>%s</td></tr>'
+                 '<td class="m" style="text-align:right;">%s</td>%s<td class="m">%s</td>%s</tr>'
                  % (' style="background:#fdf7f5;"' if first else "",
                     esc(r["日期"]), RED, "font-weight:700;" if first else "", r["账户亏损 %"], esc(r["BTC 当日最低"]),
                     '<td class="m" style="text-align:right;">%s</td>' % esc(r["ETH 当日最低"]) if has_eth else "",
-                    esc(str(r["最拖累"]).split(" ")[0]), "是" if r["强平"] else "否"))
+                    esc(str(r["最拖累"]).split(" ")[0]),
+                    ("<td>%s</td>" % ("是" if r["强平"] else "否")) if has_liq else ""))
     return ('<table class="rsd-table"><tr><th>日期</th><th style="text-align:right;">账户亏损</th>'
-            '<th style="text-align:right;">BTC 当日最低</th>%s<th>最拖累</th><th>强平</th></tr>%s</table>'
-            % ('<th style="text-align:right;">ETH 当日最低</th>' if has_eth else "", body))
+            '<th style="text-align:right;">BTC 当日最低</th>%s<th>最拖累</th>%s</tr>%s</table>'
+            % ('<th style="text-align:right;">ETH 当日最低</th>' if has_eth else "",
+               "<th>强平</th>" if has_liq else "", body))
 
 # ---------------------------------------------------------------- 雷达
 def sec_head(text: str, hint: str = "") -> str:

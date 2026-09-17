@@ -103,6 +103,8 @@ for text in ["", "你好", "做多 不存在的股票 1万", "保证金 0, 做�
     at3.text_input(key="pf_query").set_value(text)
     run_btn(at3, "运行压力测试")
     msg = ([e.value[:70] for e in at3.error] + [c.value[:70] for c in at3.caption if c.value.startswith("解析")])[:1]
+    if text.strip() and not msg:          # 空输入可以不吭声, 其余必须给说明
+        problems.append("乱填 %r 时没有任何说明" % text[:20])
     check(at3, "乱填: %r" % (text[:16] or "(空)"), "回应: %s" % (msg or "无"))
 
 # ---- 6. 单笔页的边角 ----
@@ -111,6 +113,9 @@ for text in ["3 倍做多 AMD 过周末", "100 倍做多 NVDA 过周末", "做�
     at4.text_input(key="query").set_value(text)
     run_btn(at4, "单笔压力测试")
     msg = ([e.value[:80] for e in at4.error] + [w.value[:80] for w in at4.warning])[:1]
+    got_card = "card" in at4.session_state
+    if not msg and not got_card:          # 既没结果也没说明 = 哑掉了
+        problems.append("单笔 %r 既没出结果也没给说明" % text[:20])
     check(at4, "单笔: %r" % text[:16], "回应: %s" % (msg or "出了结果"))
 
 print("\n用时 %.0f 秒" % (time.time() - t0))

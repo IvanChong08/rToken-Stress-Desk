@@ -409,14 +409,24 @@ with tab_pf:
         sc = rep.scorecard
         # 全是现货的账户不会被强平, 尺子量的是亏掉多少本金
         pf_spot_only = bool(rep.account["positions"]) and all(p.get("kind") == "spot" for p in rep.account["positions"])
-        worst_loss = max([100 * max(rep.daily_loss)] + [r["账户亏损 %"] for r in rep.multi_days[:1]])
-        liq_hit = any(i["liquidated"] for i in sc["items"])
+        # 「亏掉 X% / 那时还剩 Y%」这两个数必须来自**同一个情景**:
+        # worst_loss 取自历史 (单日 extreme 或连续多日), 而 sc["overall"] 是三项里最低的一项 ——
+        # 短板是 presets (假设情景) 时, 两个数来自完全不同的情景 (2026-09-18 对抗性审查实测,
+        # 低杠杆 SPY 组合: 说「还剩 82%」, 那天真值是 85%)。
+        day_loss = 100 * max(rep.daily_loss)
+        md_loss = rep.multi_days[0]["账户亏损 %"] if rep.multi_days else 0.0
+        hist_key = "single_day" if day_loss >= md_loss else "multi_day"
+        hist_item = next((i for i in sc["items"] if i["key"] == hist_key), None)
+        worst_loss = max(day_loss, md_loss)
+        liq_hit = bool(hist_item and hist_item["liquidated"])
         if pf_spot_only:
             tail = "现货不会被强平, 但这笔亏损照样发生。"
         elif liq_hit:
             tail = "—— 已经触及强平线。"
+        elif hist_item is not None:
+            tail = "那时离强平还剩 %d%% 的缓冲。" % round(hist_item["score"])
         else:
-            tail = "那时离强平还剩 %d%% 的缓冲。" % round(sc["overall"])
+            tail = ""
         verdict = "历史上最坏的情况会让你亏掉 <b>%.1f%%</b> 的本金, %s" % (worst_loss, tail)
         rule_short = ("分数 = 100 − 用掉的强平距离; 触及强平记 0 分。60 分以上算稳健, 30 分以下算危险。"
                       if not pf_spot_only else "全是现货: 分数 = 100 − 亏掉的本金比例。60 分以上算稳健。")
@@ -480,7 +490,8 @@ with tab_pf:
             html(ui.card_head("放回过去 5 年的每一天",
                               "%s → %s · 每根线 = 当天账户亏损 (各资产最差价同时出现)"
                               % (rep.daily_dates[0], rep.daily_dates[-1])))
-            html(ui.seismograph(rep.daily_dates, rep.daily_loss, rep.liq_loss))
+            html(ui.seismograph(rep.daily_dates, rep.daily_loss, rep.liq_loss,
+                                line_label="本金亏光" if pf_spot_only else "强平线"))
             with st.expander("地震图上最深的 5 根 · 更多情景"):
                 html(ui.worst_table(rep.worst_days))
                 st.caption("表中历史日期发生了什么事件未核实, 本工具不写原因。")
@@ -670,7 +681,8 @@ with tab_radar:
 
             # ---- 价格交叉核对 (六张同构卡片 -> 一张表) ----
             html(ui.sec_head("价格交叉核对", "· 差异超过阈值会标黄"))
-            rows, px_metrics = [], [m for m in rad["metrics"] if m["key"].endswith("_px") or "价格" in m["label"] or "现价" in m["label"]]
+            # key 形如 px_btc / px_nvda; 以前写的 endswith("_px") 恒 False, 整张表全靠 label 文字撑着
+            rows, px_metrics = [], [m for m in rad["metrics"] if m["key"].startswith("px_")]
             for m in px_metrics:
                 parts = [x.strip() for x in m["display"].split(" · ")]
                 diff = next((x for x in parts if x.startswith(("差异", "最大差异"))), "—")

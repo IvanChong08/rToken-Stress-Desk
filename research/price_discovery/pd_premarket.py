@@ -1,4 +1,5 @@
 """rToken 周一盘前价格 vs Yahoo 正股盘前价格: rToken 是否只是在跟正股盘前。"""
+import os
 import sys
 
 import pandas as pd
