@@ -46,11 +46,13 @@ html, body, [class*="st-"], button, input, textarea, select {
    09-17 实测按钮 key="guide_dismiss" 就被套了第二层边框。 */
 div.st-key-card_hold, div.st-key-card_score, div.st-key-card_plans, div.st-key-card_quake, div.st-key-card_empty,
 div.st-key-panel_01, div.st-key-panel_02, div.st-key-panel_03, div.st-key-panel_04, div.st-key-panel_05, div.st-key-panel_06 {
-  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 16px 20px 6px; margin-bottom: 14px; }
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 16px 20px 18px; margin-bottom: 14px; }
 div.st-key-guide {
-  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 8px; padding: 8px 14px 0; margin-bottom: 12px; }
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 8px; padding: 12px 14px 14px; margin-bottom: 12px; }
 div.st-key-ecard_1, div.st-key-ecard_2, div.st-key-ecard_3 {
-  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 14px 16px 6px; height: 100%; }
+  background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 14px 16px 16px; height: 100%; }
+/* 卡片里最后一个元素的下外边距会顶到边框上, 抹掉 */
+div[class*="st-key-card_"] > div > div > div:last-child, div.st-key-guide > div > div > div:last-child { margin-bottom: 0; }
 
 /* 按钮 */
 .stButton button, [data-testid="stPopover"] button {
@@ -158,13 +160,13 @@ def guide_strip() -> str:
     cells = ""
     for i, (n, t, s) in enumerate(steps):
         border = "" if i == len(steps) - 1 else "border-right:1px solid %s;" % LINE2
-        cells += ('<div style="flex:1 1 200px;display:flex;gap:10px;padding:9px 15px;%s">'
+        cells += ('<div style="flex:1 1 190px;display:flex;gap:10px;padding:4px 15px 4px 0;%s">'
                   '<span class="m" style="font-weight:700;color:%s;font-size:13px;background:%s;width:21px;height:21px;'
                   'display:flex;align-items:center;justify-content:center;flex:0 0 auto;border-radius:4px;">%s</span>'
                   '<span><b style="display:block;font-size:13px;color:%s;font-weight:500;">%s</b>'
                   '<span style="color:%s;font-size:11.5px;">%s</span></span></div>'
                   % (border, INK, LINE2, n, INK, esc(t), MUTED, esc(s)))
-    return '<div style="display:flex;flex-wrap:wrap;">%s</div>' % cells
+    return '<div style="display:flex;flex-wrap:wrap;align-items:center;row-gap:8px;">%s</div>' % cells
 
 
 def empty_card(icon: str, title: str, body: str) -> str:
@@ -405,8 +407,8 @@ def summary_line(pairs: list[tuple[str, str]]) -> str:
     """表格下面那一行: 保证金 / 权益 / 总仓位 / 有效杠杆 / 未实现盈亏。"""
     cells = "".join('<span style="color:%s;">%s <b class="m" style="color:%s;font-size:13.5px;font-weight:700;">%s</b></span>'
                     % (MUTED, esc(k), INK, esc(v)) for k, v in pairs)
-    return ('<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:10px;padding-top:11px;'
-            'border-top:1px solid %s;font-size:12.5px;">%s</div>' % (LINE2, cells))
+    return ('<div style="display:flex;gap:10px 22px;flex-wrap:wrap;margin:10px 0 20px;padding-top:11px;'
+            'border-top:1px solid %s;font-size:12.5px;line-height:1.9;">%s</div>' % (LINE2, cells))
 
 
 def mix_bar(items: list[tuple[str, float, str]], total: float) -> str:

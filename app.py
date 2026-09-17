@@ -168,6 +168,14 @@ def set_query(key: str, text: str, run: bool = False) -> None:
         st.session_state["pf_pending_run"] = True
 
 
+def account_key(a: pf.Account) -> tuple:
+    """账户指纹, 用来判断表格改没改过。四舍五入是必须的 ——
+    名义价值 = 数量 × 当前价, 而当前价每 10 分钟刷新一次, 不取整会被浮点噪声反复触发重算。"""
+    return (tuple(sorted((p.symbol, p.side, p.kind, round(p.notional, 2), round(p.entry or 0, 4))
+                         for p in a.positions)),
+            round(a.usdt, 2), round(a.btc, 6), round(a.eth, 6), a.maint_margin, a.btc_haircut)
+
+
 def mm_haircut() -> tuple[float, float]:
     return st.session_state.get("mm_pct", 1.0) / 100, st.session_state.get("haircut_pct", 95) / 100
 
@@ -344,7 +352,12 @@ with tab_pf:
 
     # ?demo=1: 打开页面就自动跑一次示例组合 (给评委 / 录屏用); 只在本会话还没有报告时触发
     demo_autorun = st.query_params.get("demo") == "1" and "pf_report" not in st.session_state
-    if (go or run_now or demo_autorun) and not err:
+    # 表格改了就自动重算, 不用再点按钮:
+    # canvas 表格在「单元格还在编辑中」时点按钮, 那一下点击会被它拿去提交编辑, 按钮收不到,
+    # 用户看到的就是「按不动」(09-17 Ivan 实测)。取数有缓存, 重算通常 1 秒以内。
+    _rep = st.session_state.get("pf_report")
+    stale = _rep is not None and not err and account_key(cur) != account_key(pf.account_from_dict(_rep.account))
+    if (go or run_now or demo_autorun or stale) and not err:
         log = get_log()
         try:
             with st.spinner("取 5 年行情并重演中..."):

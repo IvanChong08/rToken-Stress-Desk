@@ -114,5 +114,29 @@ for text in ["3 倍做多 AMD 过周末", "100 倍做多 NVDA 过周末", "做�
     check(at4, "单笔: %r" % text[:16], "回应: %s" % (msg or "出了结果"))
 
 print("\n用时 %.0f 秒" % (time.time() - t0))
+
+# ---- 7. 改了持仓要自动重算, 不用再点按钮 ----
+# canvas 表格在单元格编辑中时, 点按钮那一下会被它拿去提交编辑, 按钮收不到 -> 用户以为按不动
+a5 = new_app()
+run_btn(a5, "运行压力测试")
+before = a5.session_state["pf_report"].scorecard["overall"]
+a5.session_state["pf_account"] = pf.Account(
+    [pf.Position("NVDA", "long", 3000.0)], usdt=5000.0, btc=0.1)      # 仓位大幅缩小 -> 分数必然变高
+a5.session_state["pf_ver"] = a5.session_state["pf_ver"] + 1
+a5.run()                                                              # 不点任何按钮
+after = a5.session_state["pf_report"].scorecard["overall"]
+ok = after != before and not a5.exception
+if not ok:
+    problems.append("改持仓后没有自动重算 (%s -> %s)" % (before, after))
+check(a5, "改持仓后自动重算", "总分 %s -> %s %s" % (before, after, "OK" if ok else "★没重算"))
+
+# 同一个组合重跑不应该反复触发 (浮点噪声不能引起无限重算)
+rep_id = id(a5.session_state["pf_report"])
+a5.run()
+same = id(a5.session_state["pf_report"]) == rep_id
+if not same:
+    problems.append("没改动却又重算了一次 (会无限循环)")
+check(a5, "没改动就不重算", "OK" if same else "★又算了一次")
+
 print("%s" % ("全部通过" if not problems else "发现 %d 个问题:\n  - %s" % (len(problems), "\n  - ".join(problems))))
 sys.exit(1 if problems else 0)
