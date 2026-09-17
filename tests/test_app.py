@@ -42,6 +42,20 @@ t = time.time()
 click("运行压力测试")
 at.run()
 report("组合: 默认示例", t)
+
+# 点示例 chip: 它要把句子写进输入框, 而输入框的 key 已经被 text_input 占用 ->
+# 只能走 on_click 回调, 否则 StreamlitAPIException (09-17 云端实测炸过)
+t = time.time()
+[b for b in at.button if b.key == "pf_ex_1"][0].click()
+at.run()
+report("组合: 点示例 chip", t)
+_q = at.text_input(key="pf_query").value
+problems += not _q.startswith("保证金")
+print("  输入框已填上示例:", "OK" if _q.startswith("保证金") else "FAIL (%s)" % _q[:30])
+t = time.time()
+[b for b in at.button if b.key == "pf_fu_0"][0].click()
+at.run()
+report("组合: 点追问 chip", t)
 try:
     urls = sorted({b.proto.url for b in at.get("link_button")})
 except Exception as e:  # AppTest 对 link_button 的支持随版本变化, 取不到不算失败

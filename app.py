@@ -160,6 +160,14 @@ def render_facts(facts):
                 st.code(src, language=None)
 
 
+def set_query(key: str, text: str, run: bool = False) -> None:
+    """把示例句子填进输入框。必须当 on_click 回调用 —— 回调在下一轮渲染前执行,
+    这时改「已经被 text_input 占用的 key」才是合法的 (09-17 云端实测炸过一次)。"""
+    st.session_state[key] = text
+    if run:
+        st.session_state["pf_pending_run"] = True
+
+
 def mm_haircut() -> tuple[float, float]:
     return st.session_state.get("mm_pct", 1.0) / 100, st.session_state.get("haircut_pct", 95) / 100
 
@@ -237,13 +245,16 @@ with tab_pf:
                              label_visibility="collapsed")
         go = c_btn.button("运行压力测试", type="primary", key="pf_run", width="stretch")
 
+        # chip 必须走 on_click 回调: 输入框 (key="pf_query") 已经在上面渲染过了,
+        # 在同一轮里直接写这个 key 会被 Streamlit 拒绝 (StreamlitAPIException)。
+        # 回调是在下一轮渲染「之前」跑的, 那时改这个 key 才合法。
         chips = st.columns(len(PF_EXAMPLES) + len(PF_FOLLOWUPS))
         for i, ex in enumerate(PF_EXAMPLES):
-            if chips[i].button("示例 %d" % (i + 1), help=ex, width="stretch", key="pf_ex_%d" % i):
-                st.session_state["pf_query"] = ex
+            chips[i].button("示例 %d" % (i + 1), help=ex, width="stretch", key="pf_ex_%d" % i,
+                            on_click=set_query, args=("pf_query", ex))
         for j, q in enumerate(PF_FOLLOWUPS):
-            if chips[len(PF_EXAMPLES) + j].button(q, width="stretch", key="pf_fu_%d" % j):
-                st.session_state["pf_query"] = q
+            chips[len(PF_EXAMPLES) + j].button(q, width="stretch", key="pf_fu_%d" % j,
+                                               on_click=set_query, args=("pf_query", q))
 
         # 一句话有内容、且和上次解析过的不一样时才解析, 再用解析后的组合去跑 (两步合成一个按钮)。
         # 必须比对「上次解析过的那句」: 否则输入框里残留的旧句子会在每次点运行时把你手改的表格冲掉。
@@ -346,9 +357,8 @@ with tab_pf:
             with e1:
                 with st.container(key="ecard_1"):
                     html(ui.empty_card("◧", "我有一个组合", "多只 rToken + 保证金, 想知道什么行情会让我爆仓"))
-                    if st.button("用示例试一下", key="empty_demo", type="primary", width="stretch"):
-                        st.session_state["pf_query"] = PF_EXAMPLES[0]
-                        st.session_state["pf_pending_run"] = True
+                    st.button("用示例试一下", key="empty_demo", type="primary", width="stretch",
+                              on_click=set_query, args=("pf_query", PF_EXAMPLES[0]), kwargs={"run": True})
             with e2:
                 with st.container(key="ecard_2"):
                     html(ui.empty_card("◈", "我只想测一笔", "「3 倍做多 NVDA 过周末」会怎样 —— 周末重锚跳空 + 5 年隔夜尾部"))
@@ -479,8 +489,7 @@ with tab_trade:
 
     cols = st.columns(len(TRADE_EXAMPLES))
     for i, ex in enumerate(TRADE_EXAMPLES):
-        if cols[i].button(ex, width="stretch", key="tr_ex_%d" % i):
-            st.session_state["query"] = ex
+        cols[i].button(ex, width="stretch", key="tr_ex_%d" % i, on_click=set_query, args=("query", ex))
     t_in, t_btn = st.columns([7, 1], vertical_alignment="bottom")
     text = t_in.text_input("用一句话描述你的交易想法 (也可以追问, 例如「如果降到 2 倍呢」)", key="query")
     st.caption("单笔模式要用 rToken 的真实小时线算周末重锚, 本地只缓存了 %s 这 %d 只; "
