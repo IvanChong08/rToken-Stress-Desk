@@ -45,6 +45,7 @@ html, body, [class*="st-"], button, input, textarea, select {
    用精确 class: [class*="st-key-card_"] 这种前缀写法会连带命中 key 同前缀的控件,
    09-17 实测按钮 key="guide_dismiss" 就被套了第二层边框。 */
 div.st-key-card_hold, div.st-key-card_score, div.st-key-card_plans, div.st-key-card_quake, div.st-key-card_empty,
+div.st-key-card_analog,
 div.st-key-panel_01, div.st-key-panel_02, div.st-key-panel_03, div.st-key-panel_04, div.st-key-panel_05, div.st-key-panel_06 {
   background: #ffffff; border: 1px solid #e6e7ea; border-radius: 10px; padding: 16px 20px 18px; margin-bottom: 14px; }
 div.st-key-guide {
@@ -120,9 +121,15 @@ def grade_color(s: float) -> str:
 
 # ---------------------------------------------------------------- 侧栏
 def brand() -> str:
+    """
+    副标题必须说出这个工具独有的那件事。只写「开仓前的压力测试台」太通用 ——
+    任何风险工具都能这么说, 而「股票仓位和加密抵押品共享同一条强平线」只有全仓 rToken 用户才会遇到。
+    """
     return ('<div style="font-weight:700;font-size:19px;color:%s;line-height:1.3;letter-spacing:-0.01em;">rToken Stress Desk'
-            '<div style="font-weight:400;font-size:12px;color:%s;margin-top:3px;">开仓前的压力测试台</div></div>'
-            % (INK, MUTED))
+            '<div style="font-weight:400;font-size:12px;color:%s;margin-top:3px;line-height:1.55;">'
+            'rToken 仓位与 BTC/ETH 抵押品<b style="color:%s;">共享同一条强平线</b>；'
+            '两边同时下跌时, 单笔杠杆代表不了账户风险。</div></div>'
+            % (INK, MUTED, TEXT))
 
 
 def side_head(text: str) -> str:
@@ -588,3 +595,141 @@ def target_table(rows: list[dict], prices: dict) -> str:
             '<th style="text-align:right;">最新目标价</th><th style="text-align:right;">空间</th>'
             '<th>评级</th><th>机构</th><th>发布日</th></tr>%s</table>' % body)
 
+
+
+# ---------------------------------------------------------------- 历史相似情景
+
+def analog_today(query: dict, query_date: str, as_of: dict | None = None) -> str:
+    """
+    「查询日」的状态条。两件事必须写清楚:
+    1. 查询日可能比今天早一到两天 (盘中那根没走完的日线被丢掉了), 不说明白会被当成数据过期;
+    2. 只显示**真实存在的美股交易日**, 不显示日历边界 —— 周日运行时日历边界是周日,
+       而那天根本没有 bar, 把它印出来等于造了一个不存在的交易日 (第四轮复核指出)。
+    """
+    cells = "".join('<span style="margin-right:18px;"><span style="color:%s;">%s</span> '
+                    '<b class="m">%s</b></span>' % (MUTED, esc(k), esc(v)) for k, v in query.items())
+    tail = ""
+    if as_of:
+        n = as_of.get("dropped_incomplete") or 0
+        bar = as_of.get("us_last_complete_bar") or "—"
+        tail = ('<div style="font-size:11.5px;color:%s;margin-top:7px;">只用已经走完的日线: '
+                '美股要过当日收盘并留 15 分钟发布缓冲, 加密要过 UTC 次日 00:00 · '
+                '最后一个完整的美股交易日 %s%s</div>'
+                % (MUTED, esc(bar), ("（本次丢掉 %d 根还在形成中的日线）" % n) if n else ""))
+    return ('<div style="font-size:12.5px;margin:2px 0 12px;padding:9px 12px;background:%s;border-radius:7px;">'
+            '<span style="color:%s;margin-right:14px;">查询日 %s</span>%s%s</div>'
+            % (LINE2, MUTED, esc(query_date), cells, tail))
+
+
+def _outcome_cell(o: dict, spot_only: bool = False) -> str:
+    """
+    一格 = 一个观察期的结果。除了收益和期间最差, 还给「缓冲最低剩多少」——
+    这是本工具的核心口径 (离强平还剩多远), 用**占开仓时那段距离的百分比**而不是 USDT 金额:
+    绝对金额在不同账户之间没法比 (2026-09-19 复核指出)。
+    """
+    if o.get("ret_pct") is None:
+        return '<td class="m" style="text-align:right;color:%s;">—</td>' % MUTED
+    r = o["ret_pct"] * 100
+    col = GREEN if r > 0 else (RED if r < 0 else MUTED)
+    # 全现货账户不会被强平, 整页都不该出现「强平」两个字 (tests/test_app.py 有整页扫描)
+    word = "本金亏光" if spot_only else "强平"
+    mark = ""
+    if o.get("liquidated"):
+        mark = ' <span style="color:%s;">第 %s 天%s</span>' % (RED, o.get("liq_day", "?"), word)
+    bp = o.get("worst_buffer_pct")
+    buf = ""
+    if bp is not None and bp == bp and not spot_only and not o.get("liquidated"):
+        buf = " · 缓冲剩 %.0f%%" % (100 * max(0.0, bp))
+    # 触线之后的几天是「假设没被平掉还继续持有」的理论值, 真实账户那时已经出局
+    ghost = (' <span style="color:%s;font-size:11px;">(触线后为假设值)</span>' % MUTED
+             if o.get("counterfactual") else "")
+    return ('<td class="m" style="text-align:right;color:%s;">%+.1f%%<span style="color:%s;font-size:11px;">'
+            ' (最差 %+.1f%%%s)</span>%s%s</td>'
+            % (col, r, MUTED, o["worst_pct"] * 100, buf, mark, ghost))
+
+
+def analog_table(analogs: list[dict], spot_only: bool = False, rank_from: int = 1) -> str:
+    """
+    历史相似情景。「之后 N 日」是排完序之后才算的, 不参与相似度 ——
+    表头就把这件事写出来, 免得被读成「相似度是按后来涨跌挑的」。
+    距离只显示三位小数并强调名次: 它取决于一整套主观设定 (权重 / 窗口 / 特征集合),
+    不是概率, 也没有那么多有效精度。
+    """
+    if not analogs:
+        return ('<div style="color:%s;font-size:12.5px;padding:8px 0;">这次没能算出相似情景 '
+                '(样本不足或数据源取数失败)。</div>' % MUTED)
+    far = max(a["distance"] for a in analogs) or 1.0
+    body = ""
+    for i, a in enumerate(analogs):
+        w = 100 - min(96, 96 * a["distance"] / far) if far else 100
+        bar = ('<div style="height:3px;background:%s;margin-top:4px;">'
+               '<div style="height:3px;width:%.0f%%;background:%s;"></div></div>' % (LINE2, w, INK))
+        why = "<br>".join('<span style="color:%s;">%s</span>' % (SOFT, esc(r)) for r in a.get("reasons", []))
+        if a.get("unlike"):
+            why += ('<br><span style="color:%s;">最不像: %s</span>' % (MUTED, esc(a["unlike"])))
+        body += ('<tr><td class="m" style="vertical-align:top;color:%s;">#%d</td>'
+                 '<td class="m" style="vertical-align:top;">%s</td>'
+                 '<td style="vertical-align:top;"><span class="m">%.3f</span>%s</td>'
+                 '<td style="font-size:12px;vertical-align:top;">%s</td>%s%s%s</tr>'
+                 % (MUTED, rank_from + i, esc(a["date"]), a["distance"], bar, why,
+                    _outcome_cell(a["outcomes"][0], spot_only), _outcome_cell(a["outcomes"][1], spot_only),
+                    _outcome_cell(a["outcomes"][2], spot_only)))
+    return ('<table class="rsd-table"><tr><th></th><th>历史日期</th><th>距离 (越小越像)</th>'
+            '<th>为什么像 / 哪里不像</th>'
+            '<th style="text-align:right;">之后 1 日</th><th style="text-align:right;">之后 3 日</th>'
+            '<th style="text-align:right;">之后 5 日</th></tr>%s</table>' % body)
+
+
+def analog_neighborhood(nb: dict) -> str:
+    """
+    相似邻域 vs 同一候选池的逐日基准。
+
+    ⚠️ 这里的措辞必须停在「描述性对照」上。没有置信区间 / 自助 / 置换检验的时候,
+    **不能从「差得不多」推出「不更危险」** —— 46.7% 对 44.7% 其实还略高一点, 说「不更危险」
+    既超出证据, 也和旁边那句「不是显著性检验」自相矛盾 (2026-09-19 第四轮复核指出)。
+    """
+    if not nb:
+        return ""
+
+    def pct(x):
+        return "—" if x is None or x != x else "%.1f%%" % (100 * x)
+
+    def sgn(x):
+        return "—" if x is None or x != x else "%+.1f%%" % (100 * x)
+
+    rows = [("最相似的 %d 个日期 (经时间间隔过滤)" % nb["n"], pct(nb["neg_share"]),
+             sgn(nb["median"]), sgn(nb["worst"])),
+            ("同一合格历史日期池全部 %d 天 · 逐日 (基准)" % nb["base_n"], pct(nb["base_neg_share"]),
+             sgn(nb["base_median"]), "—")]
+    body = "".join('<tr><td>%s</td><td class="m" style="text-align:right;">%s</td>'
+                   '<td class="m" style="text-align:right;">%s</td>'
+                   '<td class="m" style="text-align:right;">%s</td></tr>' % r for r in rows)
+
+    gap = None
+    if nb.get("neg_share") is not None and nb.get("base_neg_share") == nb.get("base_neg_share"):
+        gap = 100 * (nb["neg_share"] - nb["base_neg_share"])
+    if gap is None:
+        verdict = ""
+    elif abs(gap) < 5:
+        verdict = ('本次相似日期的负收益比例比基准%s <b>%.1f 个百分点</b>。'
+                   '这个描述性差异较小, <b>不能据此判断相似环境存在稳定、可泛化的额外风险</b>。'
+                   % ("高" if gap >= 0 else "低", abs(gap)))
+    else:
+        verdict = ('本次相似日期的负收益比例比基准%s <b>%.1f 个百分点</b>。'
+                   '这只是本次查询的描述性差异, <b>不构成显著性结论</b>。'
+                   % ("高" if gap >= 0 else "低", abs(gap)))
+
+    keep = nb.get("n_retained_from_raw_top_n")
+    warn = ""
+    if keep is not None and keep < nb["n"] * 0.8:
+        warn = ('<br><b style="color:%s;">未过滤的前 %d 名里只有 %d 个相隔够远</b> —— '
+                '这一批相似日期在时间上比较聚集, 更可能来自同一段行情。' % (AMBER, nb["n"], keep))
+    return ('<table class="rsd-table"><tr><th>样本</th><th style="text-align:right;">5 日为负的比例</th>'
+            '<th style="text-align:right;">5 日收益中位数</th><th style="text-align:right;">最差 5 日</th></tr>'
+            '%s</table>'
+            '<div style="font-size:12px;color:%s;margin-top:8px;line-height:1.7;">%s%s<br>'
+            '上面一行按时间间隔过滤 (相隔不足 %d 个交易日的只留最像的一个, 否则一次行情会被重复计票), '
+            '下面一行是同一批合格候选日**逐日**计算。两者统计单位不同, '
+            '所以这是**描述性对照, 不是显著性检验, 也不是发生概率**。'
+            '换一个查询日、组合或特征配置, 结果都可能不同。</div>'
+            % (body, MUTED, verdict, warn, nb.get("min_gap", 5)))

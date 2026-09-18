@@ -43,6 +43,51 @@ click("运行压力测试")
 at.run()
 report("组合: 默认示例", t)
 
+# 历史相似情景: 这张卡是「决策压力测试」子题的字面问题 (retrieve historically similar scenarios),
+# 没有测试守着的话, 接口一改就会静默消失。
+try:                       # AppTest 的 session_state 没有 .get()
+    _ana = at.session_state["pf_analog"] or {}
+except Exception:
+    _ana = {}
+_page0 = " ".join(md_all() + [c.value for c in at.caption])   # 免责声明走 st.caption, 不在 markdown 里
+_checks = [
+    ("相似情景卡片出现", "历史上最像当前状态的日子" in _page0),
+    # 第四轮复核: 查询日可能比今天早一到两天, 页面上不能再把它叫「今天」
+    ("卡片标题不再写「最像今天」", "最像今天" not in _page0),
+    ("理由里带查询日而不是「今天」",
+     all(("今天" not in r) and ((_ana.get("query_date") or "") in r)
+         for a in _ana.get("analogs", []) for r in a.get("reasons", [])) and bool(_ana.get("analogs"))),
+    ("状态条显示真实完整交易日, 不是日历边界",
+     (_ana.get("as_of") or {}).get("us_last_complete_bar", "") in _page0),
+    ("邻域结论不写成确定性判断", "并不比随便挑一天更危险" not in _page0 and "随便挑一天" not in _page0),
+    ("邻域写明是描述性对照", "描述性对照" in _page0),
+    ("算出了相似日", len(_ana.get("analogs", [])) > 0),
+    ("每个相似日都带后续 1/3/5 日",
+     all(len(a["outcomes"]) == 3 for a in _ana.get("analogs", [])) and bool(_ana.get("analogs"))),
+    ("每个相似日给两条最像", all(len(a["reasons"]) == 2 for a in _ana.get("analogs", [])) and bool(_ana.get("analogs"))),
+    ("每个相似日还给一条最不像", all(bool(a.get("unlike")) for a in _ana.get("analogs", [])) and bool(_ana.get("analogs"))),
+    ("核心版每个候选用相同特征数", len({a["n_features"] for a in _ana.get("analogs", [])}) == 1),
+    ("核心版不含 DVOL", "BTC DVOL" not in _ana.get("features_used", [])),
+    ("DVOL 版单独成榜", isinstance(_ana.get("dvol_tier"), dict)),
+    ("给了邻域统计与全历史基准", "base_neg_share" in (_ana.get("neighborhood") or {})),
+    ("压力反例与最相似分开且标明挑选方式",
+     "按事后" in ((_ana.get("neighborhood") or {}).get("note") or "")),
+    ("有效特征数 > 0", all(a["n_features"] > 0 for a in _ana.get("analogs", [])) and bool(_ana.get("analogs"))),
+    ("相似日按距离升序", [a["distance"] for a in _ana.get("analogs", [])]
+     == sorted(a["distance"] for a in _ana.get("analogs", []))),
+    ("排除了最近的日子 (最像的不是昨天)",
+     all(a["date"] < (_ana.get("query_date") or "9999") for a in _ana.get("analogs", []))),
+    ("写明不是概率预测", "不构成概率预测" in _page0),
+    ("写明距离只是相对排序", "相对排序" in _page0),
+]
+for _name, _ok in _checks:
+    problems += not _ok
+    print("  [相似情景] %s: %s" % (_name, "OK" if _ok else "FAIL"))
+if _ana.get("analogs"):
+    print("  [相似情景] 最像的是 %s (距离 %.3f, %d 项特征) | 特征: %s"
+          % (_ana["analogs"][0]["date"], _ana["analogs"][0]["distance"],
+             _ana["analogs"][0]["n_features"], ", ".join(_ana.get("features_used", []))))
+
 # 点示例 chip: 它要把句子写进输入框, 而输入框的 key 已经被 text_input 占用 ->
 # 只能走 on_click 回调, 否则 StreamlitAPIException (09-17 云端实测炸过)
 t = time.time()
@@ -100,10 +145,14 @@ at.run()
 report("组合: 全现货零保证金", t)
 page = " ".join(md_all())
 import re as _re
+# 侧栏那句产品标语是**全局定位**, 不是对这个账户的判断 —— 它在每一页都出现, 与账户类型无关。
+# 豁免它, 但下面立刻断言它确实在页面上: 否则这条豁免会在标语改动后悄悄变成「什么都不检查」。
+TAGLINE = "共享同一条强平线"
 _liq_hits = [m for m in _re.findall(r"[^<>]{0,14}强平[^<>]{0,14}", page)
-             if "不会被强平" not in m and "本金亏光" not in m]
+             if "不会被强平" not in m and "本金亏光" not in m and TAGLINE not in m]
 for name, ok in [("写明不会被强平", "不会被强平" in page),
-                 ("整页不出现任何「强平」字样", not _liq_hits)]:
+                 ("被豁免的产品标语确实还在 (防止豁免变成放水)", TAGLINE in page),
+                 ("除全局标语外, 整页不出现任何「强平」字样", not _liq_hits)]:
     problems += not ok
     print("  %s: %s%s" % (name, "OK" if ok else "FAIL",
                           "" if ok else " <- " + str(_liq_hits[:3])))

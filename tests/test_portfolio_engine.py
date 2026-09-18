@@ -179,5 +179,30 @@ check("validate ok", pf.validate_account(A), None)
 check("validate unsupported", pf.validate_account(pf.Account([pf.Position("DOGE", "long", 1)], usdt=1)) is not None, True)
 check("validate no collateral", pf.validate_account(pf.Account([pf.Position("NVDA", "long", 1)])) is not None, True)
 
+# ---- 4. 多日强平必须看「路径上任意一天」, 不是只看亏得最多那天 ----
+# 2026-09-18 对抗性审查发现: 旧写法取「亏损最大」那一行的 liquidated, 会漏掉更早就触线的日子。
+# 空头上涨会同时压低权益并抬高维持保证金, 两者不同向 -> 最早触线的那天不一定是权益最低的那天。
+#
+# 手算 (维持保证金率 50%, 现金 1100, 空 S 名义 1000, 多 L 名义 1000):
+#   E0 = 1100 ; M0 = 0.5 * 2000 = 1000 ; 离强平的距离 = 100
+#   第 1 天 S +20% / L 0%   -> 盈亏 -200 -> 权益 900 ; 维持 = 0.5*(1200+1000) = 1100
+#                              900 <= 1100 -> 已经强平 ; 亏损 200/1100 = 18.2%
+#   第 2 天 S -50% / L -90% -> 盈亏 +500-900 = -400 -> 权益 700 ; 维持 = 0.5*(500+100) = 300
+#                              700 <= 300 ? 否 -> 没触线 ; 亏损 400/1100 = 36.4% (更大)
+#   旧写法取第 2 天 -> 报告「没强平」; 可账户在第 1 天就被平掉了, 根本活不到第 2 天。
+LD = ["2026-01-02", "2026-01-05", "2026-01-06"]
+liq_stocks = {"S": stock([(d, p, p, p, p) for d, p in zip(LD, [100.0, 120.0, 50.0])]),
+              "L": stock([(d, p, p, p, p) for d, p in zip(LD, [100.0, 100.0, 10.0])])}
+liq_btc = pd.DataFrame({"ts": [pd.Timestamp(d, tz="UTC") for d in LD],
+                        "open": 0, "high": 100000, "low": 100000, "close": 100000, "volume": 0})
+PL = pf.build_panel(liq_stocks, liq_btc)
+AL = pf.Account([pf.Position("S", "short", 1000), pf.Position("L", "long", 1000)],
+                usdt=1100, btc=0, maint_margin=0.5)
+_md = pf.multi_day_worst(AL, PL, horizon=2)
+_row = _md[_md["start"] == LD[0]].iloc[0]
+check("多日: 报告的最差仍是亏损最大那天", float(_row["loss_pct"]), 400.0 / 1100.0, 1e-6)
+check("多日: 持有期内任意一天触线即算强平", bool(_row["liquidated"]), True)
+
+
 print("\n%s" % ("全部通过" if not fails else "%d 项失败" % fails))
 sys.exit(1 if fails else 0)

@@ -163,7 +163,7 @@ def build_card(idea: TradeIdea, maint_margin: float = 0.01, cache_dir: str = CAC
     any_hit = br["hits"] > 0 or any(f.key == "wk_hits" and f.value > 0 for f in facts)
     risk = "高" if any_hit else ("中" if worst_all >= BUFFER * thr else "低")
     lev_cap = 1.0 / (worst_all / BUFFER + maint_margin) if worst_all > 0 else None
-    facts.append(Fact("lev_cap", "建议杠杆上限 (规则推算)", lev_cap,
+    facts.append(Fact("lev_cap", "参考杠杆上限 (历史尾部规则推算)", lev_cap,
                       ("%.1f 倍" % lev_cap) if lev_cap else "n/a", ["规则: " + RISK_RULE, assumption]))
 
     side_cn = "做多" if long_side else "做空"
@@ -223,7 +223,7 @@ def _template(facts: list[Fact], sc) -> str:
                  % (f["on_days"], f["on_worst"], f["on_worst_equity"], f["on_hits"]))
     if "btc_atr" in f:
         lines.append("- **若用 BTC 作保证金**: 还要叠加 BTC 自身的日均波幅 %s" % f["btc_atr"])
-    lines.append("- **建议杠杆上限**: 约 %s (规则推算), 历史不代表未来, 最终由你决定" % f["lev_cap"])
+    lines.append("- **参考杠杆上限**: 约 %s —— 这是「历史最差不利变动恰好吃掉 %d%% 强平距离」倒推出来的, 依赖历史样本和你填的维持保证金率, 不是建议, 更不是安全承诺" % (f["lev_cap"], int(BUFFER * 100)))
     return "\n".join(lines)
 
 

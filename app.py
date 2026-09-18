@@ -21,6 +21,7 @@ import streamlit as st
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
+from desk import analog as anmod  # noqa: E402
 from desk import budget  # noqa: E402
 from desk import card as cardmod  # noqa: E402
 from desk import llm, score, ui  # noqa: E402
@@ -381,6 +382,18 @@ with tab_pf:
                 panel = get_panel(tuple(sorted({p.symbol for p in cur.positions})), log)
                 st.session_state["pf_account"] = cur
                 st.session_state["pf_report"] = pcard.build_report(cur, panel, log=log, use_llm=False)
+            # 相似情景单独 try: VIX / DVOL 任何一个取不到都只是少一个特征,
+            # 不能让它把已经算好的压力测试结果一起拖垮
+            with st.spinner("检索历史相似情景..."):
+                try:
+                    vix_s, spy_s, dvol_s, _ = anmod.fetch_context(log)
+                    st.session_state["pf_analog"] = anmod.find_analogs(cur, panel, vix_s, spy_s, dvol_s)
+                except Exception as e:      # noqa: BLE001
+                    st.session_state["pf_analog"] = {
+                        "analogs": [], "query": {}, "query_date": "", "features_used": [],
+                        "dvol_tier": {}, "neighborhood": {},
+                        "notes": ["相似情景检索失败: %s" % str(e)[:140]],
+                        "disclaimer": anmod.DISCLAIMER}
         except Exception as e:      # noqa: BLE001  取数失败要给人话, 不能甩一个 Streamlit 报错页
             st.error("取行情失败, 没能跑完压力测试: %s。数据源是 Yahoo Finance, 偶尔会限流 —— "
                      "等十几秒再点一次「运行压力测试」通常就好了。" % str(e)[:120])
@@ -388,7 +401,9 @@ with tab_pf:
 
     # 位置先占住 (st.empty 不占视觉空间): 空状态卡和四张结果卡交替出现时,
     # 元素结构保持不变, 浏览器端才不会把上一轮的卡片留在页面上变成残影
-    ph_empty, ph_score, ph_plans, ph_quake, ph_evid = (st.empty() for _ in range(5))
+    # 顺序 = 占位符的创建顺序 (不是填充顺序)。相似情景放在地震图**之前**:
+    # 它是子题的核心问题, 排在地震图和一堆折叠细节之后会太深, 用户翻不到。
+    ph_empty, ph_score, ph_plans, ph_analog, ph_quake, ph_evid = (st.empty() for _ in range(6))
 
     # ---- 还没有结果: 用「你想做什么」代替空图表 ----
     if rep is None:
@@ -506,6 +521,74 @@ with tab_pf:
                 x2.dataframe(pd.DataFrame(rep.presets), width="stretch", hide_index=True)
                 st.dataframe(pd.DataFrame(rep.worst_days), width="stretch", hide_index=True)
 
+        ana = st.session_state.get("pf_analog")
+        if ana is not None:
+            with ph_analog.container(key="card_analog"):
+                html(ui.card_head("历史上最像当前状态的日子",
+                                  "「最差」不等于「最像」—— 最差那天可能发生在完全不同的波动率和股币相关性下"))
+                if ana.get("query"):
+                    html(ui.analog_today(ana["query"], ana.get("query_date", ""), ana.get("as_of")))
+                html(ui.analog_table(ana["analogs"], pf_spot_only))
+                st.caption(ana.get("disclaimer", ""))
+
+                nb = ana.get("neighborhood") or {}
+                if nb:
+                    with st.expander("这个邻域到底危不危险 · 和全部历史比一比"):
+                        html(ui.analog_neighborhood(nb))
+                    with st.expander("相似邻域里的压力反例 (按事后损失挑的, 不是最相似)"):
+                        st.caption(nb.get("note", ""))
+                        html(ui.analog_table(nb.get("adverse", []), pf_spot_only))
+                        st.caption("挑选方式与上面那张主表完全不同: 主表只按特征距离排, 排序时看不到任何未来结果; "
+                                   "这里是先取最相似的一批, 再**用事后结果**挑最差的几个。两者不能混着读。")
+
+                dv = ana.get("dvol_tier") or {}
+                if dv.get("analogs") or dv.get("note"):
+                    with st.expander("近期 DVOL 增强版 (多一项隐含波动率, 只覆盖近期)"):
+                        if dv.get("note"):
+                            st.caption(dv["note"])
+                        if dv.get("analogs"):
+                            html(ui.analog_table(dv["analogs"], pf_spot_only))
+                            st.caption("⚠️ 这张榜多用了一项 DVOL, 度量空间和上面的核心版不一样 —— "
+                                       "**两张榜的距离数值不能互相比较**, 只能各看各的名次。"
+                                       "候选日 %d 个, 覆盖 %s, 查询日 %s (核心版 %d 个, 覆盖 %s, 查询日 %s)。"
+                                       % (dv.get("n_candidates", 0), dv.get("date_range") or "—",
+                                          dv.get("query_date") or "—",
+                                          ana.get("n_candidates", 0), ana.get("date_range") or "—",
+                                          ana.get("query_date") or "—"))
+
+                # 全现货账户不会被强平, 整页都不该出现「强平」两个字 (test_app.py 有整页扫描守着)
+                _lw = "本金亏光" if pf_spot_only else "强平"
+                with st.expander("这个相似度是怎么算的"):
+                    st.markdown(
+                        "- **特征 (%d 项)**: %s\n"
+                        "- **同一张榜里每个候选日都具备完全相同的特征集合** —— 用 7 项算的距离和用 8 项算的"
+                        "不在同一个度量空间, 混排是假可比。所以 DVOL (历史只有约 1000 天) 单独成榜\n"
+                        "- **只用已经走完的日线**: 美股要过当日 16:00 ET 收盘, 加密要过 UTC 次日 00:00, "
+                        "查询日取两类都走完的最新共同日期。盘中打开页面时今天那根还在形成的日线会被丢掉 —— "
+                        "否则「今天」是半天、历史日期全是整天, 收益和波动根本不可比\n"
+                        "- **缩放**: 中位数 / IQR (对厚尾和离群日比 z-score 稳健)。scaler 用截至查询日已经可得的"
+                        "全部历史拟合 —— 查询日就是样本末端, 所以「全样本」等于「截至查询日的扩张窗口」\n"
+                        "- **距离**: 加权曼哈顿 (不用欧氏: 样本只有约 1250 天且特征厚尾, 平方会让单个离群差异"
+                        "主导排序)。配置权重 %s —— **产品设定, 不是经验最优**, 换一套排序就会变\n"
+                        "- **本次实际组权重**: %s。某个特征组整组缺失时, 距离会在剩下的组之间重新归一, "
+                        "所以实际用的比例可能和配置不一样 —— 这一行才是真正用在距离里的那套\n"
+                        "- **「为什么像」按该特征对距离的实际贡献排**, 不按裸差值; 同时给出最不像的一项\n"
+                        "- **相似度里不含 BTC/ETH 抵押品**: 只算股票仓位本身的收益, 否则 BTC 风险会被重复表达"
+                        "四次。抵押品在后续 1/3/5 日的重演、%s判定和安全分里全额参与\n"
+                        "- **去重**: 相隔不足 %d 个交易日的只保留最像的一个; **排除最近 %d 个交易日**"
+                        "(「昨天很像今天」不是证据) —— 两个都是产品设定\n"
+                        "- **之后 1/3/5 日的结果在排完序之后才算**, 不参与相似度。%s看路径上**任意一天**, "
+                        "不是只看权益最低那天 (空头上涨会同时压低权益并抬高维持保证金)\n"
+                        "- 排序用到的每个特征都只由当日及之前的数据算出, `tests/test_analog.py` 有专门的防前视测试"
+                        % (len(ana.get("features_used", [])), ", ".join(ana.get("features_used", [])) or "—",
+                           " / ".join("%s %.0f%%" % (k, v * 100)
+                                      for k, v in (ana.get("configured_weights") or {}).items()) or "—",
+                           " / ".join("%s %.1f%%" % (k, v * 100)
+                                      for k, v in (ana.get("effective_weights") or {}).items()) or "—",
+                           _lw, anmod.MIN_GAP, anmod.EXCLUDE_RECENT, _lw))
+                    for n in ana.get("notes", []):
+                        st.caption(n)
+
         with ph_evid.container():
             html(ui.evidence_bar(sc["evidence"]))
         f1, f2, f3 = st.columns(3)
@@ -616,7 +699,7 @@ with tab_radar:
         st.caption("不做新闻 / 政策解读: 那类内容无法逐句溯源, 而且 Bitget 自己的 AI 已经在做。"
                    "同一个数字尽量用多个来源交叉核对, 对不上会标黄。")
         c1, c2 = st.columns([1, 5], vertical_alignment="bottom")
-        go = c1.button("取数 (约 8 秒)", type="primary", key="radar_run", width="stretch")
+        go = c1.button("取数 (首次约 30-60 秒, 之后走缓存)", type="primary", key="radar_run", width="stretch")
         if c2.button("重新取数 (清缓存)", key="radar_refresh"):
             get_radar.clear()
             go = True

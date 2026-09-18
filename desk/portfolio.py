@@ -393,9 +393,16 @@ def multi_day_worst(a: Account, panel: Panel, horizon: int = 5) -> pd.DataFrame:
                                   "btc_move": rel[BTC].values if BTC in rel.columns else float("nan")}))
     df = pd.concat(rows).dropna()
     df["loss_pct"] = (e0 - df["equity"]) / e0
-    df["liquidated"] = df["equity"] <= df["maint"]
+    df["breached"] = df["equity"] <= df["maint"]
+    # 强平要看持有期内「有没有任何一天」触及, 不能只看亏得最多的那天。
+    # 空头上涨会同时压低权益并抬高维持保证金 -> 最早触线的那天不一定是权益最低的那天。
+    # 反例 (tests/test_portfolio_engine.py 有手算样本): 第 1 天权益 900 / 维持 1100 已经强平,
+    # 第 2 天权益 700 更低但维持只剩 300 反而没触线 —— 旧写法取第 2 天, 报告「没强平」,
+    # 可账户在第 1 天就已经被平掉, 根本活不到第 2 天。错在往「更安全」的方向偏。
+    touched = df.groupby("start")["breached"].any()
     worst = df.sort_values("loss_pct", ascending=False).drop_duplicates("start")
-    return worst.reset_index(drop=True)
+    worst["liquidated"] = worst["start"].map(touched).astype(bool)
+    return worst.drop(columns=["breached"]).reset_index(drop=True)
 
 
 def scale_to_liquidation(a: Account, btc_price: float, moves: dict[str, float],
