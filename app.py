@@ -459,17 +459,10 @@ with tab_pf:
             # 分点结论的第一条是「安全总分」, 和上面的四格分数卡重复 -> 这里不再重复一遍
             _lines = [l for l in rep.narrative.splitlines() if "**安全总分**" not in l]
             html(ui.bullets("\n".join(_lines), sc["overall"]))
-            b_l, b_r = st.columns([3, 2])
-            with b_l:
-                if llm.available_provider() and rep.narrative_by == "template" and st.button(
-                        "让大模型用人话总结 (1–2 分钟, 写完逐个核对数字)", key="pf_narrate", width="stretch"):
-                    if budget.take():
-                        with st.spinner("大模型写结论中..."):
-                            pcard.narrate(rep, log=get_log())
-                        st.rerun()
-                    else:
-                        st.warning("大模型今日额度已用完 (%s)。上面的分点结论由模板生成, 数字完全一样。" % budget.status_text())
-            b_r.caption("结论生成方式: %s" % rep.narrative_by)
+            # 「让大模型用人话总结」那个按钮已撤掉 (2026-09-19): 上游补全接口实测要 1~2 分钟
+            # 且经常 ReadTimeout, 而模板结论已经把话说清楚了 —— 一个等两分钟还常失败的按钮,
+            # 在评委面前是负资产。narrate() 本身保留在 portfolio_card / card 里, 测试照跑。
+            st.caption("结论生成方式: %s (数字全部由代码算, 大模型不参与)" % rep.narrative_by)
             with st.expander(("亏损尺" if pf_spot_only else "强平距离尺") + " · 打分规则原文"):
                 html(ui.ruler(sc["items"], "本金亏光" if pf_spot_only else "强平"))
                 st.caption("规则: " + sc["rule"])
@@ -670,15 +663,7 @@ with tab_trade:
             with st.container(key="panel_t2"):
                 html(ui.panel_title("02", "结论"))
                 html(ui.bullets(c.narrative, c.scorecard["overall"] if c.scorecard else None))
-                st.caption("结论生成方式: %s" % c.narrative_by)
-                if llm.available_provider() and c.narrative_by == "template" and st.button(
-                        "让大模型用人话总结 (1–2 分钟, 写完逐个核对数字)", key="tr_narrate"):
-                    if budget.take():
-                        with st.spinner("大模型写结论中..."):
-                            cardmod.narrate(c, log=get_log())
-                        st.rerun()
-                    else:
-                        st.warning("大模型今日额度已用完 (%s)。上面的分点结论由模板生成, 数字完全一样。" % budget.status_text())
+                st.caption("结论生成方式: %s (数字全部由代码算, 大模型不参与)" % c.narrative_by)
                 st.info(c.tier_text)
         with st.container(key="panel_t3"):
             html(ui.panel_title("03", "事实表与来源"))
