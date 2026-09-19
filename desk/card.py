@@ -188,7 +188,14 @@ def build_card(idea: TradeIdea, maint_margin: float = 0.01, cache_dir: str = CAC
 
 
 def narrate(c: Card, log: CallLog | None = None, timeout: float = 90.0) -> Card:
-    """让大模型把事实表写成人话 (原地更新卡片)。数字核对不过或调用失败时保留模板结论。"""
+    """
+    让大模型把事实表写成人话 (原地更新卡片)。数字核对不过或调用失败时保留模板结论。
+
+    ⚠️ **产品里走不到这里** (2026-09-19 起): app.py 调 build_card 时固定传 use_llm=False,
+    界面上那个「让大模型用人话总结」按钮已撤掉。原因是下面 unverified_numbers() 那层核对
+    是成员检查不是配对校验 —— 数字在事实表里出现过 != 配在了对的那句话上。
+    函数和测试留着只为记录这段设计过程, 不代表还在用。
+    """
     idea = TradeIdea(**{k: c.idea[k] for k in ("symbol", "side", "leverage", "scenario", "raw_text", "parsed_by", "note")})
     safety = score_text(c.scorecard) if c.scorecard else ""
     text, lprov = _llm_narrative(idea, c.facts, safety, c.tier, timeout)

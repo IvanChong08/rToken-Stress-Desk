@@ -196,7 +196,13 @@ def build_report(a: pf.Account, panel: pf.Panel, horizon: int = 5, use_llm: bool
 
 
 def narrate(report: PortfolioReport, horizon: int = 5, log: CallLog | None = None, timeout: float = LLM_TIMEOUT) -> PortfolioReport:
-    """让大模型把事实表写成人话 (原地更新 report)。数字核对不过或调用失败时保留模板结论。"""
+    """
+    让大模型把事实表写成人话 (原地更新 report)。数字核对不过或调用失败时保留模板结论。
+
+    ⚠️ **产品里走不到这里** (2026-09-19 起): app.py 调 build_report 时固定传 use_llm=False,
+    界面上那个「让大模型用人话总结」按钮已撤掉 —— 核对器是成员检查不是配对校验。
+    函数和测试留着只为记录这段设计过程, 不代表还在用。详见 README「撤掉的那道防线」。
+    """
     text, lprov = llm.chat([{"role": "system", "content": NARRATIVE_PROMPT},
                             {"role": "user", "content": json.dumps(
                                 {"facts": [{"label": f.label, "display": f.display} for f in report.facts]},

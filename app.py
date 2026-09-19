@@ -206,8 +206,10 @@ def sidebar_status(check_skill: bool) -> list[tuple]:
         (bool(asof), "rToken 行情", ("截至 %s" % asof) if asof else "缓存读取失败"),
         (skill[0], "Bitget Skill", skill[1]),
         (stock_mcp_ok()[0], "Bitget 美股 MCP", stock_mcp_ok()[1]),
+        # 写清楚这个额度花在哪 —— 撤掉总结按钮之后, 大模型只剩「解析复杂修改指令」一个用途,
+        # 光显示「QWEN 剩 N 次」会让人以为它还在参与计算或写结论
         (True if (provider and left) else (False if provider else None), "大模型",
-         ("%s 剩 %d 次" % (provider.upper(), left)) if provider else "未配置"),
+         ("%s 剩 %d 次 · 仅用于解析复杂修改指令" % (provider.upper(), left)) if provider else "未配置"),
         (log_ok, "调用日志", log_text),
     ]
 
